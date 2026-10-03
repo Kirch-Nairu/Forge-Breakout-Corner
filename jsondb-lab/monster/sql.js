@@ -73,17 +73,25 @@ function compileSQL(sql) {
   sql = String(sql || '').trim().replace(/;\s*$/, '');
   const explain = /^EXPLAIN(?:\s+ANALYZE)?\s+/i.test(sql);
   sql = sql.replace(/^EXPLAIN(?:\s+ANALYZE)?\s+/i, '');
-  const head = sql.match(/^SELECT\s+([\s\S]+?)\s+FROM\s+([A-Za-z_][\w-]*)(?:\s+(?:AS\s+)?([A-Za-z_][\w]*))?\s*([\s\S]*)$/i);
+  const head = sql.match(/^SELECT\s+([\s\S]+?)\s+FROM\s+([A-Za-z_][\w-]*)(?:\s+AS\s+([A-Za-z_][\w]*))?\s*([\s\S]*)$/i);
   if (!head) throw Object.assign(new Error('Only SELECT/EXPLAIN SELECT is supported by cursed SQL mode.'), { status: 400 });
   const { select, aggregates } = parseSelectList(head[1]);
   const query = { from: head[2], select: select.length ? select : ['*'] };
+  const baseAlias = head[3] || head[2];
   let rest = head[4].trim();
 
   const joins = [];
   while (/^(?:LEFT\s+|INNER\s+)?JOIN\s+/i.test(rest)) {
-    const m = rest.match(/^(?:(LEFT|INNER)\s+)?JOIN\s+([A-Za-z_][\w-]*)(?:\s+(?:AS\s+)?([A-Za-z_][\w]*))?\s+ON\s+([A-Za-z_][\w.]*)\s*=\s*([A-Za-z_][\w.]*)\s*([\s\S]*)$/i);
+    const m = rest.match(/^(?:(LEFT|INNER)\s+)?JOIN\s+([A-Za-z_][\w-]*)(?:\s+AS\s+([A-Za-z_][\w]*))?\s+ON\s+([A-Za-z_][\w.]*)\s*=\s*([A-Za-z_][\w.]*)\s*([\s\S]*)$/i);
     if (!m) throw Object.assign(new Error(`Cannot parse JOIN near: ${rest}`), { status: 400 });
-    joins.push({ collection: m[2], as: m[3] || m[2], type: (m[1] || 'inner').toLowerCase(), on: { left: m[4].replace(new RegExp(`^${head[3] || head[2]}\\.`), ''), right: m[5].replace(new RegExp(`^${m[3] || m[2]}\\.`), '') } });
+    const alias = m[3] || m[2];
+    joins.push({
+      collection: m[2], as: alias, type: (m[1] || 'inner').toLowerCase(),
+      on: {
+        left: m[4].replace(new RegExp(`^${baseAlias}\\.`), ''),
+        right: m[5].replace(new RegExp(`^${alias}\\.`), '')
+      }
+    });
     rest = m[6].trim();
     if (/^(WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|OFFSET|AS\s+OF)\b/i.test(rest)) break;
   }
