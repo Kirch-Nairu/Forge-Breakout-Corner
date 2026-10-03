@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>JSONDB Monster Mode</title>
+  <style>
+    :root{--bg:#070a09;--panel:#101613;--panel2:#151d19;--line:#28362f;--text:#edf6f0;--muted:#8fa298;--green:#74e2a7;--gold:#e6c35f;--red:#ff8d8a;--blue:#7ec8ff;font-family:Inter,ui-sans-serif,system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0,rgba(116,226,167,.1),transparent 30rem),linear-gradient(#060807,var(--bg));color:var(--text)}button,input,textarea,select{font:inherit}.shell{width:min(1500px,calc(100% - 28px));margin:auto;padding:24px 0 48px}header{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:18px}.eyebrow{font-size:11px;letter-spacing:.17em;text-transform:uppercase;font-weight:900;color:var(--green)}h1{font-size:clamp(34px,6vw,72px);letter-spacing:-.05em;line-height:.92;margin:6px 0}.lede{color:var(--muted);max-width:820px;line-height:1.55}.badge{border:1px solid var(--line);background:var(--panel);padding:10px 12px;border-radius:12px;color:var(--gold);font:12px ui-monospace,monospace}.metrics{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:16px 0}.metric,.card{border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.018),transparent),var(--panel);border-radius:16px}.metric{padding:13px}.metric strong{display:block;font-size:23px;letter-spacing:-.04em}.metric span{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.1em}.layout{display:grid;grid-template-columns:1.15fr .85fr;gap:14px}.stack{display:grid;gap:14px}.card{padding:16px}.head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}.head h2{font-size:14px;margin:0}.help{font-size:12px;color:var(--muted);line-height:1.45}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}button{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:10px;padding:9px 11px;cursor:pointer;font-weight:750;font-size:12px}button:hover{border-color:#456052}button.primary{background:var(--green);color:#07110b;border-color:transparent}button.warn{color:var(--gold)}button.danger{color:var(--red)}input,select,textarea{width:100%;background:#0b100d;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px;outline:none}textarea{min-height:230px;resize:vertical;font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace}textarea.small{min-height:130px}.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.output{white-space:pre-wrap;overflow:auto;max-height:440px;min-height:80px;background:#090d0b;border:1px solid #1e2923;border-radius:12px;padding:12px;color:#bcd0c4;font:11px/1.55 ui-monospace,monospace}.output .hot{color:var(--green)}.collection{display:grid;grid-template-columns:1fr auto auto auto;gap:8px;padding:9px 0;border-top:1px solid rgba(40,54,47,.65);align-items:center}.collection:first-child{border-top:0}.collection small{color:var(--muted)}.node{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid rgba(40,54,47,.65)}.node:first-child{border-top:0}.role{font:10px ui-monospace,monospace;padding:3px 7px;border-radius:99px;border:1px solid var(--line)}.leader{color:var(--green)}.follower{color:var(--blue)}.offline{color:var(--red)}.capabilities{display:flex;flex-wrap:wrap;gap:6px}.capabilities span{font-size:10px;border:1px solid var(--line);color:var(--muted);padding:5px 7px;border-radius:999px}footer{text-align:center;color:#5f7067;font-size:11px;margin-top:20px}.flash{min-height:20px;color:var(--green);font-size:12px;margin:8px 0}@media(max-width:1050px){.metrics{grid-template-columns:repeat(3,1fr)}.layout{grid-template-columns:1fr}}@media(max-width:600px){header{flex-direction:column}.metrics{grid-template-columns:repeat(2,1fr)}.row{grid-template-columns:1fr}.shell{width:min(100% - 18px,1500px)}}
+  </style>
+</head>
+<body>
+<main class="shell">
+  <header>
+    <div><div class="eyebrow">Forge Breakout Corner / Database Crimes Division</div><h1>JSONDB Monster Mode</h1><div class="lede">WAL. MVCC-ish time travel. Segments. Compaction. Hash joins. Foreign keys. Materialized views. CDC. Checkpoints. Merkle-ish integrity. A fake three-node cluster. All because apparently using SQLite would have ended the experiment too early.</div></div>
+    <div class="badge">NO NPM · NO FRAMEWORK · NO REAL DB</div>
+  </header>
+
+  <section class="metrics">
+    <div class="metric"><strong id="tx">—</strong><span>next transaction</span></div>
+    <div class="metric"><strong id="lsn">—</strong><span>next WAL LSN</span></div>
+    <div class="metric"><strong id="wal">—</strong><span>WAL bytes</span></div>
+    <div class="metric"><strong id="queries">—</strong><span>queries</span></div>
+    <div class="metric"><strong id="commits">—</strong><span>commits</span></div>
+    <div class="metric"><strong id="leader">—</strong><span>cluster leader</span></div>
+  </section>
+
+  <div class="flash" id="flash"></div>
+
+  <section class="layout">
+    <div class="stack">
+      <article class="card">
+        <div class="head"><h2>Query planner / executor</h2><button id="runQuery" class="primary">Execute AST</button></div>
+        <div class="help">POST a tiny JSON query language. Use <code>asOf</code> to replay version history and query the database at an old transaction.</div>
+        <textarea id="query">{
+  "from": "tasks",
+  "where": { "field": "status", "op": "eq", "value": "active" },
+  "select": ["id", "slug", "title", "priority"],
+  "orderBy": ["-priority"],
+  "limit": 100
+}</textarea>
+        <div class="output" id="queryOut">Planner output will appear here.</div>
+      </article>
+
+      <article class="card">
+        <div class="head"><h2>Transaction coordinator</h2><button id="runTx" class="primary">COMMIT</button></div>
+        <div class="help">Atomic multi-collection mutation with before-image recovery, WAL, constraints, MVCC history, segment append, index rebuild, and rollback on failure.</div>
+        <textarea id="txBody">{
+  "isolation": "snapshot-ish",
+  "ops": [
+    {
+      "type": "insert",
+      "collection": "tasks",
+      "row": {
+        "slug": "monster-manual-row",
+        "title": "Inserted through the cursed transaction coordinator",
+        "status": "active",
+        "priority": 777
+      }
+    }
+  ]
+}</textarea>
+        <div class="output" id="txOut">No transaction committed yet.</div>
+      </article>
+
+      <article class="card">
+        <div class="head"><h2>DDL / collection factory</h2><button id="createCollection">Create collection</button></div>
+        <div class="help">Define unique constraints, secondary/composite indexes, and foreign keys in JSON catalog metadata.</div>
+        <textarea class="small" id="ddl">{
+  "name": "offices",
+  "unique": ["code"],
+  "indexes": [
+    { "name": "offices_code_uq", "fields": ["code"], "unique": true },
+    { "name": "offices_name", "fields": ["name"] }
+  ]
+}</textarea>
+        <div class="output" id="ddlOut">Catalog mutation output.</div>
+      </article>
+
+      <article class="card">
+        <div class="head"><h2>WAL / change data capture</h2><button id="loadWal">Refresh WAL</button></div>
+        <div class="row"><input id="cdcAfter" type="number" min="0" value="0" placeholder="after LSN"><button id="loadCdc">Read CDC after LSN</button></div>
+        <div class="output" id="walOut">WAL events appear here.</div>
+      </article>
+    </div>
+
+    <div class="stack">
+      <article class="card">
+        <div class="head"><h2>Storage engine</h2><button id="refresh" class="primary">Refresh state</button></div>
+        <div id="collections"></div>
+        <div class="actions">
+          <button id="checkpoint">Checkpoint + rotate WAL</button>
+          <button id="compact">Compact segments</button>
+          <button id="snapshot">Snapshot</button>
+          <button id="integrity">SHA-256 integrity</button>
+        </div>
+        <div class="output" id="storageOut">Storage operations output.</div>
+      </article>
+
+      <article class="card">
+        <div class="head"><h2>Three-node consensus theater</h2><button id="replicate" class="primary">Replicate all</button></div>
+        <div id="nodes"></div>
+        <div class="actions">
+          <button id="failover" class="danger">Kill leader + fail over</button>
+          <button id="promote">Promote local node</button>
+          <button id="heartbeat">Heartbeat</button>
+        </div>
+        <div class="output" id="clusterOut">This is explicitly not Raft.</div>
+      </article>
+
+      <article class="card">
+        <div class="head"><h2>Materialized view</h2><button id="makeView">Materialize</button></div>
+        <input id="viewName" value="active_tasks" placeholder="view name" />
+        <textarea class="small" id="viewQuery">{
+  "from": "tasks",
+  "where": { "field": "status", "op": "eq", "value": "active" },
+  "orderBy": ["-priority"],
+  "limit": 500
+}</textarea>
+        <div class="output" id="viewOut">View output.</div>
+      </article>
+
+      <article class="card">
+        <div class="head"><h2>Abuse generator</h2><button id="seed" class="warn">Generate 5,000 JSON rows</button></div>
+        <div class="help">Batches synthetic rows through the actual transaction/WAL/index/version pipeline. No shortcuts.</div>
+        <input id="benchCollection" value="bench" placeholder="collection" />
+        <div class="output" id="benchOut">Nothing abused yet.</div>
+      </article>
+
+      <article class="card">
+        <div class="head"><h2>Capabilities acquired while refusing SQLite</h2></div>
+        <div class="capabilities" id="caps"></div>
+      </article>
+    </div>
+  </section>
+
+  <footer>JSONDB MONSTER MODE · local-first · zero dependencies · educationally irresponsible · persistent state never leaves this machine unless you move the files yourself</footer>
+</main>
+<script>
+const $=s=>document.querySelector(s);const fmt=v=>JSON.stringify(v,null,2);const flash=m=>{$('#flash').textContent=m;clearTimeout(flash.t);flash.t=setTimeout(()=>$('#flash').textContent='',2200)};
+async function api(path,options={}){const r=await fetch(path,{headers:{'content-type':'application/json'},...options});const j=await r.json();if(!r.ok)throw new Error(j.error||`HTTP ${r.status}`);return j}
+async function action(label,fn,out){try{flash(`${label}…`);const v=await fn();if(out)$(out).textContent=fmt(v);flash(`${label}: done`);await refresh()}catch(e){if(out)$(out).textContent=`ERROR\n${e.message}`;flash(`${label}: ${e.message}`)}}
+async function refresh(){const s=await api('/api/status');const e=s.engine,c=s.cluster;$('#tx').textContent=e.nextTx;$('#lsn').textContent=e.nextLsn;$('#wal').textContent=e.walBytes.toLocaleString();$('#queries').textContent=e.metrics.queries;$('#commits').textContent=e.metrics.commits;$('#leader').textContent=c.leader.replace('node-','');$('#caps').replaceChildren(...e.capabilities.map(x=>{const n=document.createElement('span');n.textContent=x;return n}));$('#collections').replaceChildren(...e.collections.map(x=>{const n=document.createElement('div');n.className='collection';n.innerHTML=`<div><strong>${x.name}</strong><br><small>tx ${x.lastTx} · schema v${x.schemaVersion}</small></div><span>${x.rows} rows</span><span>${x.indexes} idx</span><span>${x.versionBytes}B mvcc</span>`;return n}));$('#nodes').replaceChildren(...Object.entries(c.nodes).map(([id,n])=>{const row=document.createElement('div');row.className='node';const role=n.online?n.role:'offline';row.innerHTML=`<div><strong>${id}</strong><br><small>LSN ${n.appliedLsn||0}</small></div><span class="role ${role}">${role}</span><button data-elect="${id}">elect</button>`;return row}));document.querySelectorAll('[data-elect]').forEach(b=>b.onclick=()=>action('Election',()=>api('/api/cluster/elect',{method:'POST',body:fmt({candidate:b.dataset.elect})}),'#clusterOut'))}
+$('#refresh').onclick=()=>action('Refresh',refresh,'#storageOut');
+$('#runQuery').onclick=()=>action('Query',()=>api('/api/query',{method:'POST',body:$('#query').value}),'#queryOut');
+$('#runTx').onclick=()=>action('Transaction',()=>api('/api/tx',{method:'POST',body:$('#txBody').value}),'#txOut');
+$('#createCollection').onclick=()=>action('DDL',()=>api('/api/collections',{method:'POST',body:$('#ddl').value}),'#ddlOut');
+$('#checkpoint').onclick=()=>action('Checkpoint',()=>api('/api/checkpoint',{method:'POST'}),'#storageOut');
+$('#compact').onclick=()=>action('Compaction',()=>api('/api/compact',{method:'POST',body:'{}'}),'#storageOut');
+$('#snapshot').onclick=()=>action('Snapshot',()=>api('/api/snapshot',{method:'POST'}),'#storageOut');
+$('#integrity').onclick=()=>action('Integrity scan',()=>api('/api/integrity',{method:'POST'}),'#storageOut');
+$('#loadWal').onclick=()=>action('Load WAL',()=>api('/api/wal?limit=120'),'#walOut');
+$('#loadCdc').onclick=()=>action('CDC',()=>api(`/api/cdc?after=${encodeURIComponent($('#cdcAfter').value)}&limit=200`),'#walOut');
+$('#replicate').onclick=()=>action('Replication',()=>api('/api/cluster/replicate',{method:'POST',body:'{}'}),'#clusterOut');
+$('#failover').onclick=()=>action('Failover',()=>api('/api/cluster/failover',{method:'POST'}),'#clusterOut');
+$('#promote').onclick=()=>action('Promote local',()=>api('/api/cluster/promote-local',{method:'POST'}),'#clusterOut');
+$('#heartbeat').onclick=()=>action('Heartbeat',()=>api('/api/cluster/heartbeat',{method:'POST'}),'#clusterOut');
+$('#makeView').onclick=()=>action('Materialize view',()=>api(`/api/views/${encodeURIComponent($('#viewName').value)}`,{method:'POST',body:$('#viewQuery').value}),'#viewOut');
+$('#seed').onclick=()=>action('Abuse generator',()=>api('/api/benchmark/seed',{method:'POST',body:fmt({collection:$('#benchCollection').value,count:5000})}),'#benchOut');
+refresh().catch(e=>flash(e.message));
+</script>
+</body>
+</html>
