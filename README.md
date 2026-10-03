@@ -5,7 +5,7 @@ A tiny public playground for experiments that do **not** need to belong to a pro
 Current experiments:
 
 - **Breakout Console** — a local-first, dependency-free browser workspace for capturing ideas, generating weird build prompts, and keeping one small focus target in view.
-- **Chaos Deck** — three-card constraint roulette for generating a mission, a constraint, and one unnecessary curse. Lock the parts you like, reroll the rest, then throw the result into the Breakout Console scratchpad.
+- **Chaos Deck** — three-card constraint roulette for generating a mission, a constraint, and one unnecessary curse. Lock the parts you like, reroll the rest, then throw the result toward the Breakout Console before good judgment returns.
 
 ## Run it
 
@@ -39,7 +39,11 @@ No install, build step, account, backend, or network connection is required.
 - keyboard shortcuts for rolling and locking
 - last eight rolls saved locally
 - copy the current mission as plain text
-- send the current roll directly into the Breakout Console scratchpad
+- best-effort handoff to the Breakout Console scratchpad when both pages share the same browser origin
 - no network calls, packages, or backend state
+
+### Tiny browser caveat
+
+Browsers do not guarantee that two separately opened `file://` pages share the same `localStorage` bucket. If your browser isolates them, **Copy mission** is the reliable zero-server handoff. If both files are served from the same origin, the **Throw into scratchpad** action can share the Breakout Console's local storage normally.
 
 Made in the spirit of a breakout corner: useful enough to keep, disposable enough to mutate.
