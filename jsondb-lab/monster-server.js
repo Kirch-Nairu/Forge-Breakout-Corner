@@ -8,6 +8,7 @@ const path = require('path');
 const { URL } = require('url');
 const { MonsterEngine } = require('./monster/engine');
 const { JsonCluster } = require('./monster/cluster');
+const { AdvancedServices } = require('./monster/advanced');
 const { readJson, readJsonl } = require('./monster/jsonfs');
 
 const ROOT = __dirname;
@@ -16,6 +17,7 @@ const HOST = process.env.HOST || '127.0.0.1';
 const PORT = Number(process.env.MONSTER_PORT || process.env.PORT || 7332);
 const engine = new MonsterEngine(ROOT);
 const cluster = new JsonCluster(engine);
+const advanced = new AdvancedServices(engine);
 
 function json(res, status, payload) {
   const text = JSON.stringify(payload, null, 2);
@@ -43,6 +45,20 @@ async function parseBody(req, max = 5_000_000) {
 
 async function requireLeader() { await cluster.assertLeader(); }
 
+async function lockedTransact(ops, options = {}) {
+  await requireLeader();
+  const requestTx = `lock-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const resources = ops.flatMap(op => [`table:${op.collection}`, ...(op.id ? [`row:${op.collection}:${op.id}`] : [])]);
+  const lock = await advanced.locks.acquire(requestTx, resources, options.lockTimeoutMs || 5000);
+  try {
+    const triggered = await advanced.applyBeforeTriggers(ops);
+    const result = await engine.transact(triggered.ops, options);
+    return { ...result, lock, triggersFired: triggered.fired };
+  } finally {
+    advanced.locks.release(requestTx);
+  }
+}
+
 async function seed(collection, count) {
   await requireLeader();
   count = Math.min(50_000, Math.max(1, Number(count || 1000)));
@@ -62,6 +78,7 @@ async function seed(collection, count) {
   const offices = ['Engineering', 'Budget', 'Accounting', 'MPDO', 'Mayor'];
   const started = process.hrtime.bigint();
   let inserted = 0;
+  const batchNonce = Date.now();
   for (let start = 0; start < count; start += 500) {
     const size = Math.min(500, count - start);
     const ops = [];
@@ -70,7 +87,7 @@ async function seed(collection, count) {
       ops.push({
         type: 'insert', collection,
         row: {
-          syntheticKey: `row-${Date.now()}-${n}`,
+          syntheticKey: `row-${batchNonce}-${n}`,
           ordinal: n,
           status: statuses[n % statuses.length],
           office: offices[n % offices.length],
@@ -79,7 +96,7 @@ async function seed(collection, count) {
         }
       });
     }
-    await engine.transact(ops);
+    await lockedTransact(ops);
     inserted += size;
   }
   const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
@@ -89,9 +106,10 @@ async function seed(collection, count) {
 async function api(req, res, url) {
   const p = url.pathname;
 
-  if (p === '/api/status' && req.method === 'GET') return json(res, 200, { engine: await engine.status(), cluster: await cluster.status() });
+  if (p === '/api/status' && req.method === 'GET') return json(res, 200, { engine: await engine.status(), cluster: await cluster.status(), advanced: await advanced.status() });
   if (p === '/api/catalog' && req.method === 'GET') return json(res, 200, await engine.catalog());
   if (p === '/api/cluster' && req.method === 'GET') return json(res, 200, await cluster.status());
+  if (p === '/api/locks' && req.method === 'GET') return json(res, 200, advanced.locks.status());
   if (p === '/api/cdc' && req.method === 'GET') return json(res, 200, { events: await engine.cdc(url.searchParams.get('after') || 0, url.searchParams.get('limit') || 200) });
 
   if (p === '/api/collections' && req.method === 'POST') {
@@ -105,9 +123,8 @@ async function api(req, res, url) {
   }
 
   if (p === '/api/tx' && req.method === 'POST') {
-    await requireLeader();
     const body = await parseBody(req);
-    return json(res, 200, await engine.transact(body.ops, { isolation: body.isolation }));
+    return json(res, 200, await lockedTransact(body.ops, { isolation: body.isolation, lockTimeoutMs: body.lockTimeoutMs }));
   }
   if (p === '/api/query' && req.method === 'POST') return json(res, 200, await engine.query(await parseBody(req)));
 
@@ -119,18 +136,9 @@ async function api(req, res, url) {
       const result = await engine.query({ from: collection, where, orderBy: url.searchParams.get('sort') ? [url.searchParams.get('sort')] : [], limit: Number(url.searchParams.get('limit') || 100), asOf: url.searchParams.get('asOf') || undefined });
       return json(res, 200, result);
     }
-    if (req.method === 'POST' && !rowId) {
-      await requireLeader();
-      return json(res, 201, await engine.transact([{ type: 'insert', collection, row: await parseBody(req) }]));
-    }
-    if (req.method === 'PATCH' && rowId) {
-      await requireLeader();
-      return json(res, 200, await engine.transact([{ type: 'update', collection, id: rowId, patch: await parseBody(req) }]));
-    }
-    if (req.method === 'DELETE' && rowId) {
-      await requireLeader();
-      return json(res, 200, await engine.transact([{ type: 'delete', collection, id: rowId }]));
-    }
+    if (req.method === 'POST' && !rowId) return json(res, 201, await lockedTransact([{ type: 'insert', collection, row: await parseBody(req) }]));
+    if (req.method === 'PATCH' && rowId) return json(res, 200, await lockedTransact([{ type: 'update', collection, id: rowId, patch: await parseBody(req) }]));
+    if (req.method === 'DELETE' && rowId) return json(res, 200, await lockedTransact([{ type: 'delete', collection, id: rowId }]));
   }
 
   if (p === '/api/checkpoint' && req.method === 'POST') { await requireLeader(); return json(res, 201, await engine.checkpoint()); }
@@ -143,6 +151,30 @@ async function api(req, res, url) {
   if (viewRoute && req.method === 'POST') { await requireLeader(); return json(res, 201, await engine.createMaterializedView(viewRoute[1], await parseBody(req))); }
   if (viewRoute && req.method === 'GET') return json(res, 200, await readJson(path.join(engine.views, `${viewRoute[1]}.json`), { error: 'View not materialized.' }));
   if (p === '/api/views/refresh' && req.method === 'POST') { await requireLeader(); return json(res, 200, await engine.refreshViews()); }
+
+  if (p === '/api/analyze' && req.method === 'POST') return json(res, 200, await advanced.analyze((await parseBody(req)).collection));
+  if (p === '/api/bloom/build' && req.method === 'POST') {
+    const body = await parseBody(req);
+    return json(res, 201, await advanced.buildBloom(body.collection, body.field, body.bits, body.hashes));
+  }
+  if (p === '/api/bloom/test' && req.method === 'POST') {
+    const body = await parseBody(req);
+    return json(res, 200, await advanced.testBloom(body.collection, body.field, body.value));
+  }
+  if (p === '/api/partitions/build' && req.method === 'POST') {
+    const body = await parseBody(req);
+    return json(res, 201, await advanced.buildPartitions(body.collection, body.field, body.buckets));
+  }
+
+  const preparedRoute = p.match(/^\/api\/prepared\/([A-Za-z][A-Za-z0-9_-]{0,63})$/);
+  if (preparedRoute && req.method === 'POST') return json(res, 201, await advanced.prepare(preparedRoute[1], (await parseBody(req)).query));
+  const executePrepared = p.match(/^\/api\/prepared\/([A-Za-z][A-Za-z0-9_-]{0,63})\/execute$/);
+  if (executePrepared && req.method === 'POST') return json(res, 200, await advanced.executePrepared(executePrepared[1], (await parseBody(req)).params || {}));
+
+  if (p === '/api/triggers' && req.method === 'POST') { await requireLeader(); return json(res, 201, await advanced.addTrigger(await parseBody(req))); }
+  if (p === '/api/migrations' && req.method === 'POST') { await requireLeader(); return json(res, 200, await advanced.applyMigration(await parseBody(req))); }
+  if (p === '/api/backup' && req.method === 'POST') return json(res, 201, await advanced.backup());
+  if (p === '/api/restore-sandbox' && req.method === 'POST') return json(res, 201, await advanced.restoreSandbox((await parseBody(req)).backup));
 
   if (p === '/api/cluster/replicate' && req.method === 'POST') {
     const body = await parseBody(req);
@@ -197,6 +229,7 @@ async function serveStatic(res, url) {
 async function main() {
   await engine.init();
   await cluster.init();
+  await advanced.init();
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
@@ -204,17 +237,17 @@ async function main() {
       else await serveStatic(res, url);
     } catch (error) {
       console.error('[MONSTER]', error);
-      json(res, error.status || 500, { error: error.message, stack: process.env.JSONDB_DEBUG ? error.stack : undefined });
+      json(res, error.status || 500, { error: error.message, code: error.code, stack: process.env.JSONDB_DEBUG ? error.stack : undefined });
     }
   });
   server.listen(PORT, HOST, () => {
-    console.log('\n╔══════════════════════════════════════════════════════════════╗');
-    console.log('║ JSONDB MONSTER MODE                                        ║');
-    console.log('║ We went past the point where SQLite would have been sane.  ║');
-    console.log('╚══════════════════════════════════════════════════════════════╝');
+    console.log('\n╔══════════════════════════════════════════════════════════════════════╗');
+    console.log('║ JSONDB MONSTER MODE                                                ║');
+    console.log('║ We went past the point where SQLite would have been sane.          ║');
+    console.log('╚══════════════════════════════════════════════════════════════════════╝');
     console.log(`Control plane : http://${HOST}:${PORT}`);
     console.log(`Persistent JSON: ${engine.data}`);
-    console.log('WAL + MVCC-ish history + planner + joins + checkpoints + fake cluster.');
+    console.log('WAL + MVCC-ish + planner + joins + locks + deadlocks + bloom + cluster.');
     console.log('No npm. No framework. No actual database. Absolutely no reason.\n');
   });
 }
