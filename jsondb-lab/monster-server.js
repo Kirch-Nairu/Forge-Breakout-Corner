@@ -9,6 +9,7 @@ const { URL } = require('url');
 const { MonsterEngine } = require('./monster/engine');
 const { JsonCluster } = require('./monster/cluster');
 const { AdvancedServices } = require('./monster/advanced');
+const { compileSQL } = require('./monster/sql');
 const { readJson, readJsonl } = require('./monster/jsonfs');
 
 const ROOT = __dirname;
@@ -127,6 +128,12 @@ async function api(req, res, url) {
     return json(res, 200, await lockedTransact(body.ops, { isolation: body.isolation, lockTimeoutMs: body.lockTimeoutMs }));
   }
   if (p === '/api/query' && req.method === 'POST') return json(res, 200, await engine.query(await parseBody(req)));
+  if (p === '/api/sql' && req.method === 'POST') {
+    const body = await parseBody(req);
+    const compiled = compileSQL(body.sql);
+    const result = await engine.query(compiled.query);
+    return json(res, 200, { sql: compiled.sql, compiled: compiled.query, explainRequested: compiled.explain, ...result });
+  }
 
   const dataRoute = p.match(/^\/api\/data\/([A-Za-z][A-Za-z0-9_-]{0,63})(?:\/([0-9a-f-]{36}))?$/i);
   if (dataRoute) {
@@ -247,7 +254,7 @@ async function main() {
     console.log('╚══════════════════════════════════════════════════════════════════════╝');
     console.log(`Control plane : http://${HOST}:${PORT}`);
     console.log(`Persistent JSON: ${engine.data}`);
-    console.log('WAL + MVCC-ish + planner + joins + locks + deadlocks + bloom + cluster.');
+    console.log('WAL + MVCC-ish + planner + SQL-ish + locks + bloom + cluster.');
     console.log('No npm. No framework. No actual database. Absolutely no reason.\n');
   });
 }
