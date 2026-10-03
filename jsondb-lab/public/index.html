@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>JSONDB Lab</title>
+  <style>
+    :root{--bg:#080b0a;--panel:#101613;--panel2:#151d19;--line:#28342d;--text:#eef6f0;--muted:#8da097;--green:#76e3a8;--green2:#bdf6d4;--gold:#e5c15b;--red:#ff8f8b;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+    *{box-sizing:border-box} body{margin:0;min-height:100vh;background:radial-gradient(circle at 10% 0%,rgba(118,227,168,.08),transparent 34rem),linear-gradient(180deg,#060806,var(--bg));color:var(--text)}
+    button,input,select,textarea{font:inherit} button{cursor:pointer}.shell{width:min(1500px,calc(100% - 28px));margin:0 auto;padding:22px 0 48px}
+    header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:16px}.eyebrow{color:var(--green);font-size:11px;font-weight:900;letter-spacing:.17em;text-transform:uppercase}.title{font-size:clamp(32px,5vw,64px);line-height:.92;letter-spacing:-.05em;margin:8px 0 0}.lede{max-width:780px;color:var(--muted);line-height:1.55;margin:12px 0 0}.badge{border:1px solid var(--line);background:var(--panel);color:var(--green2);padding:9px 11px;border-radius:999px;font-size:12px;white-space:nowrap}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.stat{border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:14px}.stat b{display:block;font-size:24px;letter-spacing:-.04em}.stat span{display:block;color:var(--muted);font-size:11px;margin-top:3px;text-transform:uppercase;letter-spacing:.1em}
+    .grid{display:grid;grid-template-columns:260px minmax(0,1fr) 380px;gap:12px;align-items:start}.panel{border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.015),transparent 40%),var(--panel);border-radius:18px;overflow:hidden}.panel-head{padding:14px 15px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:10px}.panel-head h2{font-size:13px;margin:0}.panel-head small{color:var(--muted)}.panel-body{padding:14px}
+    .collections{display:grid;gap:7px}.collection{width:100%;text-align:left;border:1px solid transparent;background:transparent;color:var(--text);border-radius:11px;padding:10px}.collection:hover{background:var(--panel2)}.collection.active{border-color:rgba(118,227,168,.36);background:rgba(118,227,168,.08)}.collection strong{display:block}.collection span{display:block;color:var(--muted);font-size:11px;margin-top:3px}.new-collection{display:grid;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+    input,select,textarea{width:100%;border:1px solid var(--line);background:#0b100d;color:var(--text);border-radius:10px;outline:none}input,select{height:39px;padding:0 10px}textarea{min-height:130px;padding:11px;resize:vertical;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}input:focus,select:focus,textarea:focus{border-color:rgba(118,227,168,.65);box-shadow:0 0 0 3px rgba(118,227,168,.08)}
+    .btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:10px;padding:9px 11px;font-size:12px;font-weight:800}.btn:hover{border-color:#405047}.btn.primary{background:var(--green);color:#07100b;border-color:transparent}.btn.gold{color:#211906;background:var(--gold);border-color:transparent}.btn.danger{color:var(--red)}.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.row>*{flex:1}.row .auto{flex:0 0 auto}
+    .query{display:grid;grid-template-columns:1.1fr .7fr 1.2fr .8fr .7fr auto;gap:7px;padding:12px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.01)}.query .btn{height:39px}.plan{padding:8px 12px;color:var(--muted);font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;border-bottom:1px solid var(--line)}
+    .table-wrap{overflow:auto;max-height:590px}.records{width:100%;border-collapse:collapse;font-size:12px}.records th,.records td{padding:9px 10px;border-bottom:1px solid rgba(40,52,45,.65);text-align:left;vertical-align:top;white-space:nowrap}.records th{position:sticky;top:0;background:#101613;color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;z-index:2}.records tr:hover td{background:rgba(255,255,255,.015)}.cell{max-width:230px;overflow:hidden;text-overflow:ellipsis}.id{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#9bb0a4}.empty{padding:48px 20px;text-align:center;color:var(--muted)}
+    .tabs{display:flex;border-bottom:1px solid var(--line)}.tab{flex:1;border:0;border-right:1px solid var(--line);background:#0c110e;color:var(--muted);padding:10px 8px;font-size:11px;font-weight:800}.tab:last-child{border-right:0}.tab.active{background:var(--panel2);color:var(--green2)}.tabview{display:none}.tabview.active{display:block}.label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin:12px 0 6px}.hint{color:var(--muted);font-size:11px;line-height:1.5}.result{margin-top:10px;max-height:250px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:10px;background:#090d0b;white-space:pre-wrap;font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.wal{display:grid;gap:7px;max-height:520px;overflow:auto}.wal-item{border:1px solid var(--line);background:#0b100d;border-radius:10px;padding:9px}.wal-item b{color:var(--gold);font-size:11px}.wal-item span{display:block;color:var(--muted);font:10px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin-top:4px;word-break:break-all}
+    .toast{position:fixed;right:18px;bottom:18px;background:#121a15;border:1px solid var(--line);padding:11px 13px;border-radius:11px;box-shadow:0 16px 50px rgba(0,0,0,.45);font-size:12px;opacity:0;transform:translateY(8px);pointer-events:none;transition:.15s ease}.toast.show{opacity:1;transform:none}.toast.error{color:var(--red)}
+    footer{text-align:center;color:#5f7066;font-size:11px;margin-top:16px}
+    @media(max-width:1100px){.grid{grid-template-columns:230px 1fr}.side-right{grid-column:1/-1}.stats{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:760px){header{flex-direction:column}.stats{grid-template-columns:1fr 1fr}.grid{grid-template-columns:1fr}.query{grid-template-columns:1fr 1fr}.query>*:nth-last-child(-n+2){grid-column:auto}.side-right{grid-column:auto}.table-wrap{max-height:460px}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <div class="eyebrow">Forge Breakout Corner / JSON Database Final Boss</div>
+        <h1 class="title">JSONDB Lab</h1>
+        <p class="lede">A basic CRUD app burdened with a WAL, undo-journal transactions, atomic file replacement, JSON indexes, query planning, snapshots and crash recovery because apparently SQLite offended us personally.</p>
+      </div>
+      <div class="badge">NO NPM · NO FRAMEWORK · JSON ONLY</div>
+    </header>
+
+    <section class="stats">
+      <div class="stat"><b id="statCollections">—</b><span>Collections</span></div>
+      <div class="stat"><b id="statRows">—</b><span>Rows</span></div>
+      <div class="stat"><b id="statWal">—</b><span>WAL bytes</span></div>
+      <div class="stat"><b id="statSnapshots">—</b><span>Snapshots</span></div>
+    </section>
+
+    <section class="grid">
+      <aside class="panel">
+        <div class="panel-head"><h2>Collections</h2><button class="btn auto" id="refreshBtn">↻</button></div>
+        <div class="panel-body">
+          <div class="collections" id="collections"></div>
+          <div class="new-collection">
+            <div class="label">Create collection</div>
+            <input id="newName" placeholder="e.g. incidents" />
+            <input id="newUnique" placeholder="unique fields: slug,email" />
+            <button class="btn" id="createCollectionBtn">Create JSON table</button>
+          </div>
+        </div>
+      </aside>
+
+      <section class="panel">
+        <div class="panel-head"><div><h2 id="collectionTitle">tasks</h2><small id="collectionMeta">loading…</small></div><button class="btn gold" id="snapshotBtn">Snapshot DB</button></div>
+        <div class="query">
+          <input id="qField" placeholder="field" />
+          <select id="qOp"><option>eq</option><option>ne</option><option>contains</option><option>gt</option><option>gte</option><option>lt</option><option>lte</option></select>
+          <input id="qValue" placeholder="value" />
+          <input id="qSort" placeholder="sort e.g. -priority" />
+          <input id="qLimit" type="number" value="100" min="1" max="500" />
+          <button class="btn primary" id="queryBtn">Query</button>
+        </div>
+        <div class="plan" id="plan">planner: waiting for bad decisions…</div>
+        <div class="table-wrap" id="tableWrap"></div>
+      </section>
+
+      <aside class="panel side-right">
+        <div class="tabs">
+          <button class="tab active" data-tab="insert">Insert</button>
+          <button class="tab" data-tab="tx">Transaction</button>
+          <button class="tab" data-tab="wal">WAL</button>
+        </div>
+        <div class="panel-body">
+          <div class="tabview active" id="tab-insert">
+            <div class="hint">Write a row as JSON. IDs and timestamps are added automatically.</div>
+            <div class="label">Record</div>
+            <textarea id="insertJson">{
+  "title": "Invent a worse database",
+  "status": "active",
+  "priority": 3
+}</textarea>
+            <div class="row" style="margin-top:8px"><button class="btn primary" id="insertBtn">INSERT + COMMIT</button></div>
+            <pre class="result" id="insertResult">No transaction yet.</pre>
+          </div>
+
+          <div class="tabview" id="tab-tx">
+            <div class="hint">Batch multiple writes under one undo-journal transaction. If an operation fails, the touched JSON tables are restored from their before-images.</div>
+            <div class="label">Operations</div>
+            <textarea id="txJson">{
+  "ops": [
+    {
+      "type": "insert",
+      "collection": "tasks",
+      "row": {"title":"Operation A","status":"queued"}
+    },
+    {
+      "type": "insert",
+      "collection": "tasks",
+      "row": {"title":"Operation B","status":"queued"}
+    }
+  ]
+}</textarea>
+            <div class="row" style="margin-top:8px"><button class="btn primary" id="txBtn">BEGIN → COMMIT</button></div>
+            <pre class="result" id="txResult">Transaction engine idle.</pre>
+          </div>
+
+          <div class="tabview" id="tab-wal">
+            <div class="row"><button class="btn" id="walRefreshBtn">Reload WAL</button></div>
+            <div class="wal" id="wal" style="margin-top:10px"></div>
+          </div>
+        </div>
+      </aside>
+    </section>
+
+    <footer>Everything persists as ordinary JSON/JSONL under <code>jsondb-lab/data/</code>. The browser is just a client. The cursed part lives on disk.</footer>
+  </main>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const state={meta:null,catalog:null,collection:'tasks',result:null};
+    const $=s=>document.querySelector(s);
+    const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+    async function request(url,options={}){
+      const res=await fetch(url,{...options,headers:{'content-type':'application/json',...(options.headers||{})}});
+      const data=await res.json();
+      if(!res.ok) throw new Error(data.error||`HTTP ${res.status}`);
+      return data;
+    }
+    function toast(message,error=false){const el=$('#toast');el.textContent=message;el.className=`toast show${error?' error':''}`;clearTimeout(toast.t);toast.t=setTimeout(()=>el.className='toast',2200)}
+    function parseEditor(id){try{return JSON.parse($(id).value)}catch(e){throw new Error(`Invalid JSON: ${e.message}`)}}
+
+    async function loadMeta(){
+      state.meta=await request('/api/meta');
+      $('#statCollections').textContent=state.meta.collections.length;
+      $('#statRows').textContent=state.meta.collections.reduce((n,c)=>n+c.rows,0);
+      $('#statWal').textContent=state.meta.walBytes.toLocaleString();
+      $('#statSnapshots').textContent=state.meta.snapshots;
+      renderCollections();
+    }
+    async function loadCatalog(){state.catalog=await request('/api/collections');renderCollections()}
+    function renderCollections(){
+      const root=$('#collections');root.replaceChildren();
+      const list=state.meta?.collections||[];
+      for(const c of list){
+        const b=document.createElement('button');b.className=`collection${c.name===state.collection?' active':''}`;
+        b.innerHTML=`<strong>${esc(c.name)}</strong><span>${c.rows} rows · v${c.version}${c.unique?.length?` · unique: ${esc(c.unique.join(','))}`:''}</span>`;
+        b.onclick=()=>selectCollection(c.name);root.appendChild(b);
+      }
+    }
+    async function selectCollection(name){state.collection=name;renderCollections();await query();}
+
+    function queryString(){
+      const p=new URLSearchParams();
+      const pairs=[['field',$('#qField').value],['op',$('#qOp').value],['value',$('#qValue').value],['sort',$('#qSort').value],['limit',$('#qLimit').value]];
+      for(const [k,v] of pairs) if(v!=='') p.set(k,v);
+      return p.toString();
+    }
+    async function query(){
+      try{
+        const result=await request(`/api/data/${encodeURIComponent(state.collection)}?${queryString()}`);state.result=result;renderTable(result);
+        const meta=state.meta?.collections.find(c=>c.name===state.collection);
+        $('#collectionTitle').textContent=state.collection;
+        $('#collectionMeta').textContent=`${result.total} matched${meta?` · ${meta.rows} stored · version ${meta.version}`:''}`;
+        $('#plan').textContent=`planner: ${result.plan.type} · examined ${result.plan.examined}${result.plan.field?` · index ${result.plan.field}`:''}`;
+      }catch(e){toast(e.message,true)}
+    }
+    function renderTable(result){
+      const root=$('#tableWrap');
+      if(!result.rows.length){root.innerHTML='<div class="empty">Nothing here. Either the query is brilliant or the database is empty.</div>';return}
+      const fields=[...new Set(result.rows.flatMap(r=>Object.keys(r)))];
+      const head=fields.map(f=>`<th>${esc(f)}</th>`).join('');
+      const body=result.rows.map(r=>`<tr>${fields.map(f=>{let v=r[f];if(typeof v==='object'&&v!==null)v=JSON.stringify(v);return `<td class="cell ${f==='id'?'id':''}" title="${esc(v??'')}">${esc(v??'')}</td>`}).join('')}</tr>`).join('');
+      root.innerHTML=`<table class="records"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    }
+
+    async function createCollection(){
+      try{
+        const name=$('#newName').value.trim();const unique=$('#newUnique').value.split(',').map(x=>x.trim()).filter(Boolean);
+        await request('/api/collections',{method:'POST',body:JSON.stringify({name,unique})});
+        $('#newName').value='';$('#newUnique').value='';state.collection=name;await refreshAll();toast(`Created ${name}.json because schemas are apparently optional.`)
+      }catch(e){toast(e.message,true)}
+    }
+    async function insert(){
+      try{
+        const result=await request(`/api/data/${encodeURIComponent(state.collection)}`,{method:'POST',body:JSON.stringify(parseEditor('#insertJson'))});
+        $('#insertResult').textContent=JSON.stringify(result,null,2);await refreshAll();toast('Committed to disk + WAL.')
+      }catch(e){$('#insertResult').textContent=e.message;toast(e.message,true)}
+    }
+    async function transact(){
+      try{
+        const result=await request('/api/tx',{method:'POST',body:JSON.stringify(parseEditor('#txJson'))});
+        $('#txResult').textContent=JSON.stringify(result,null,2);await refreshAll();toast(`COMMIT ${result.txid.slice(0,8)}…`)
+      }catch(e){$('#txResult').textContent=e.message;toast(`ABORT: ${e.message}`,true)}
+    }
+    async function snapshot(){
+      try{const r=await request('/api/snapshot',{method:'POST',body:'{}'});await loadMeta();toast(`Snapshot ${r.snapshot}`)}catch(e){toast(e.message,true)}
+    }
+    async function loadWal(){
+      try{
+        const {events}=await request('/api/wal?limit=80');const root=$('#wal');root.replaceChildren();
+        if(!events.length){root.innerHTML='<div class="empty">WAL is suspiciously peaceful.</div>';return}
+        [...events].reverse().forEach(e=>{const item=document.createElement('div');item.className='wal-item';item.innerHTML=`<b>${esc(e.type)}</b><span>${esc(e.at)}${e.txid?` · ${esc(e.txid)}`:''}</span><span>${esc(JSON.stringify(e))}</span>`;root.appendChild(item)})
+      }catch(e){toast(e.message,true)}
+    }
+    async function refreshAll(){await Promise.all([loadMeta(),loadCatalog()]);await query()}
+
+    document.querySelectorAll('.tab').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===btn));document.querySelectorAll('.tabview').forEach(x=>x.classList.remove('active'));$(`#tab-${btn.dataset.tab}`).classList.add('active');if(btn.dataset.tab==='wal')loadWal()});
+    $('#refreshBtn').onclick=refreshAll;$('#queryBtn').onclick=query;$('#createCollectionBtn').onclick=createCollection;$('#insertBtn').onclick=insert;$('#txBtn').onclick=transact;$('#snapshotBtn').onclick=snapshot;$('#walRefreshBtn').onclick=loadWal;
+    $('#qValue').addEventListener('keydown',e=>{if(e.key==='Enter')query()});
+    refreshAll().catch(e=>toast(e.message,true));
+  </script>
+</body>
+</html>
