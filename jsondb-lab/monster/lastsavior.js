@@ -78,7 +78,7 @@ class LastSaviorArchive {
     } catch (error) { spacetime = { status:'DEFERRED', reason:error.message }; }
 
     const archiveCore = {
-      format: 'JSONDB-LAST-SAVIOR-ARCHIVE-6',
+      format: 'JSONDB-LAST-SAVIOR-ARCHIVE-7',
       id: `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`,
       label, createdAt: now(),
       world: { semanticSha256: federation.omegaEpoch.semanticWorldSha256, federationId: federation.id, omegaEpochId: federation.omegaEpoch.id, omegaEpochHash: federation.omegaEpoch.epochHash, worldTreeCommit: federation.worldTree.commit },
@@ -115,6 +115,7 @@ class LastSaviorArchive {
         'Recovery data and validation evidence are intentionally separated.',
         'No single decoder family is sufficient promotion authority.',
         'Recovery Contracts travel with the archive so future operators can distinguish reconstructive, corroborative, transport, adjudication, and human-authority roles.',
+        'Archive validity resolves the historical Recovery Contract registry by content hash; later policy evolution is drift, not retroactive archive corruption.',
         'Holograms and randomized Shadow Laws corroborate reconstructions without serving as their recovery source.',
         'Spacetime ARK adds a 2-D erasure product code across storage shards and historical epochs when enough history exists.',
         'Semantic Delta Fossils provide reversible row-aware transitions between fossil-specific Memory Palace endpoints.',
@@ -160,8 +161,9 @@ class LastSaviorArchive {
     const computed = digest(copy); const staticValid = computed === receipt.archiveHash;
     const coreCopy = { ...receipt }; delete coreCopy.coreHash; delete coreCopy.forwardWitness; delete coreCopy.evidenceBundle; delete coreCopy.physicalDiaspora; delete coreCopy.archiveHash; delete coreCopy.polyhash;
     const computedCoreHash = digest(coreCopy); const coreValid = computedCoreHash === receipt.coreHash;
+    const archivedContracts = receipt.corroborationFamilies?.recoveryContracts || null;
 
-    const [federation, rosetta, seed, quaternary, shadowRecord, forwardChain, spacetime, fossil, currentContracts] = await Promise.all([
+    const [federation, rosetta, seed, quaternary, shadowRecord, forwardChain, spacetime, fossil, historicalContracts, currentContracts] = await Promise.all([
       this.k.federation.verify(receipt.world.federationId, { live: options.live === true }).catch(error => ({ valid: false, error: error.message })),
       this.k.rosetta.verify(receipt.recoveryFamilies.rosettaCapsule).catch(error => ({ valid: false, error: error.message })),
       this.k.civilizationSeed.verify(receipt.recoveryFamilies.civilizationSeed).catch(error => ({ valid: false, error: error.message })),
@@ -170,6 +172,7 @@ class LastSaviorArchive {
       this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
       receipt.recoveryFamilies?.spacetimeArk ? this.k.spacetime.recover(receipt.recoveryFamilies.spacetimeArk).catch(error => ({ status:'ERROR', error:error.message })) : Promise.resolve({status:'NOT_PRESENT'}),
       receipt.recoveryFamilies?.semanticFossil?.id ? this.k.fossils.verify(receipt.recoveryFamilies.semanticFossil.id).catch(error=>({valid:false,error:error.message})) : Promise.resolve({valid:true,status:'NOT_PRESENT'}),
+      this.k.recoveryContracts.version(archivedContracts?.registryHash || null).catch(() => null),
       this.k.recoveryContracts.init().catch(error => ({ registryHash:null, error:error.message }))
     ]);
     if (quaternary?.buffer) delete quaternary.buffer;
@@ -179,16 +182,27 @@ class LastSaviorArchive {
     const diaspora = receipt.physicalDiaspora?.id ? await this.k.diaspora.verifyPlacement(receipt.physicalDiaspora.id).catch(error => ({ valid: false, error: error.message })) : { valid: true, status: 'NOT_SCATTERED' };
     const polyhash = await this.k.polyhash.verify({ ...copy, archiveHash: receipt.archiveHash }, receipt.polyhash).catch(error => ({ valid: false, error: error.message }));
     const spacetimeOkay = ['NOT_PRESENT','RECOVERED','PARTIAL'].includes(spacetime.status);
-    const archivedContracts = receipt.corroborationFamilies?.recoveryContracts || null;
-    const contractsAtArchiveSafe = Boolean(archivedContracts?.valid && Number(archivedContracts?.automaticPromoters || 0) === 0 && Number(archivedContracts?.violations || 0) === 0);
+
+    const historicalRegistryCopy = historicalContracts ? { ...historicalContracts } : null;
+    if (historicalRegistryCopy) delete historicalRegistryCopy.registryHash;
+    const historicalRegistryHashValid = Boolean(historicalRegistryCopy && digest(historicalRegistryCopy) === archivedContracts?.registryHash && historicalContracts.registryHash === archivedContracts?.registryHash);
+    const historicalContractsNoAutoPromoters = Boolean(historicalContracts && Object.values(historicalContracts.contracts || {}).every(c => c?.mayPromoteCanonical !== true));
+    const contractsAtArchiveSafe = Boolean(
+      archivedContracts?.valid &&
+      Number(archivedContracts?.automaticPromoters || 0) === 0 &&
+      Number(archivedContracts?.violations || 0) === 0 &&
+      historicalRegistryHashValid &&
+      historicalContractsNoAutoPromoters
+    );
     const currentContractRegistryMatchesArchive = Boolean(archivedContracts?.registryHash && currentContracts?.registryHash === archivedContracts.registryHash);
+
     const independent = {
       federation: federation.valid === true,
       rosetta: rosetta.valid === true,
       civilizationSeed: seed.valid === true,
       quaternary: quaternary.status === 'RECOVERED',
       spacetime: spacetimeOkay,
-      semanticFossil:fossil.valid===true,
+      semanticFossil: fossil.valid === true,
       recoveryContractsAtArchive: contractsAtArchiveSafe,
       recoveryContractsCurrentMatch: options.live === true ? currentContractRegistryMatchesArchive : null,
       shadowLawRecord: shadowRecord.valid === true,
@@ -197,17 +211,45 @@ class LastSaviorArchive {
       diaspora: diaspora.valid === true || diaspora.status === 'NOT_SCATTERED',
       polyhash: polyhash.valid === true
     };
-    const booleanChannels = Object.values(independent).filter(x => typeof x === 'boolean'); const healthy = booleanChannels.filter(Boolean).length;
+    const booleanChannels = Object.values(independent).filter(x => typeof x === 'boolean');
+    const healthy = booleanChannels.filter(Boolean).length;
+    const historicalValid = staticValid && coreValid && independent.federation && independent.rosetta && independent.civilizationSeed && independent.quaternary && independent.spacetime && independent.semanticFossil && independent.recoveryContractsAtArchive && independent.shadowLawRecord && independent.forwardWitness && independent.polyhash && (independent.shadowLawLive !== false);
+
     return {
-      format: 'JSONDB-LAST-SAVIOR-VERIFY-6', id: receipt.id,
-      valid: staticValid && coreValid && independent.federation && independent.rosetta && independent.civilizationSeed && independent.quaternary && independent.spacetime && independent.semanticFossil && independent.recoveryContractsAtArchive && independent.shadowLawRecord && independent.forwardWitness && independent.polyhash && (independent.shadowLawLive !== false) && (options.live !== true || independent.recoveryContractsCurrentMatch === true),
-      staticValid, coreValid, expectedCoreHash: receipt.coreHash, computedCoreHash, expectedArchiveHash: receipt.archiveHash, computedArchiveHash: computed,
-      independentEvidence: independent, healthyChannels: healthy, totalBooleanChannels: booleanChannels.length,
-      federation, rosetta, civilizationSeed: seed, quaternary, spacetime, semanticFossil:fossil,
-      recoveryContracts: { archived: archivedContracts, currentRegistryHash: currentContracts?.registryHash || null, currentRegistryMatchesArchive: currentContractRegistryMatchesArchive },
-      shadowLawRecord: shadowRecord, shadowChallenge,
-      forwardWitness: { valid: forwardValid, chainValid: forwardChain.valid, record: forwardRecord }, diaspora, polyhash,
-      doctrine: 'A green result means independent artifacts remain internally consistent and the archived recovery constitution did not grant automatic promotion. It is not authorization to replace canonical state.'
+      format: 'JSONDB-LAST-SAVIOR-VERIFY-7',
+      id: receipt.id,
+      valid: historicalValid,
+      historicalValid,
+      staticValid,
+      coreValid,
+      expectedCoreHash: receipt.coreHash,
+      computedCoreHash,
+      expectedArchiveHash: receipt.archiveHash,
+      computedArchiveHash: computed,
+      independentEvidence: independent,
+      healthyChannels: healthy,
+      totalBooleanChannels: booleanChannels.length,
+      policyDriftedSinceArchive: Boolean(contractsAtArchiveSafe && !currentContractRegistryMatchesArchive),
+      federation,
+      rosetta,
+      civilizationSeed: seed,
+      quaternary,
+      spacetime,
+      semanticFossil: fossil,
+      recoveryContracts: {
+        archived: archivedContracts,
+        historicalRegistryAvailable: Boolean(historicalContracts),
+        historicalRegistryHashValid,
+        historicalContractsNoAutoPromoters,
+        currentRegistryHash: currentContracts?.registryHash || null,
+        currentRegistryMatchesArchive: currentContractRegistryMatchesArchive
+      },
+      shadowLawRecord: shadowRecord,
+      shadowChallenge,
+      forwardWitness: { valid: forwardValid, chainValid: forwardChain.valid, record: forwardRecord },
+      diaspora,
+      polyhash,
+      doctrine: 'Historical archive validity is resolved against the archived content-addressed Recovery Contract registry. Later policy drift is reported separately and does not retroactively invalidate the archive.'
     };
   }
 }
