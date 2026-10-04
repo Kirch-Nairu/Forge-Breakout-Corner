@@ -11,6 +11,7 @@ const { SaviorSystem } = require('./monster/savior');
 const { TemporalQuorumGuardian } = require('./monster/guardian');
 const { QuantumInspiredLab } = require('./monster/quantum');
 const { ExtinctionLab } = require('./monster/apocalypse');
+const { OrthogonalArk } = require('./monster/orthogonal');
 const { readJson, readJsonl } = require('./monster/jsonfs');
 
 const ROOT = __dirname;
@@ -23,16 +24,17 @@ const savior = new SaviorSystem(engine, { cells: 5 });
 const guardian = new TemporalQuorumGuardian(savior);
 const quantum = new QuantumInspiredLab(engine, savior);
 const apocalypse = new ExtinctionLab(engine, savior);
+const orthogonal = new OrthogonalArk(engine, savior);
 
 function json(res, status, payload) {
-  const body = JSON.stringify(payload, null, 2);
+  const text = JSON.stringify(payload, null, 2);
   res.writeHead(status, {
     'content-type': 'application/json; charset=utf-8',
-    'content-length': Buffer.byteLength(body),
+    'content-length': Buffer.byteLength(text),
     'cache-control': 'no-store',
     'x-jsondb-mode': 'last-savior'
   });
-  res.end(body);
+  res.end(text);
 }
 
 async function body(req, max = 10_000_000) {
@@ -55,7 +57,8 @@ async function status() {
     engine: await engine.status(),
     savior: await savior.status(),
     witnessChain: await guardian.verifyChain(),
-    mirrorWorld: await guardian.worldVerdict().catch(error => ({ healthy: false, error: error.message }))
+    mirrorWorld: await guardian.worldVerdict().catch(error => ({ healthy: false, error: error.message })),
+    orthogonalLatest: await readJson(path.join(orthogonal.root, 'latest.json'), null)
   };
 }
 
@@ -63,15 +66,25 @@ async function safeTransact(spec = {}) {
   await savior.assertWritable();
   const pre = await guardian.witnessRound('pre-transaction');
   const result = await engine.transact(spec.ops || [], { isolation: spec.isolation });
+  let mirror;
+  try {
+    mirror = await savior.captureMirrors();
+  } catch (error) {
+    await savior.setMode('read-only', `Post-commit mirror capture failed: ${error.message}`);
+    throw Object.assign(new Error(`Transaction committed, but survival replication failed. Writes frozen: ${error.message}`), { status: 503, committed: true });
+  }
   const post = await guardian.witnessRound('post-transaction');
-  return { result, witness: { pre: pre.roundHash, post: post.roundHash } };
+  let archive = null;
+  if (String(spec.survivalLevel || '').toUpperCase() === 'MAXIMUM') archive = await orthogonal.archive(`tx-${result.txid || Date.now()}`);
+  return { result, survivalProtocol: { preWitness: pre.roundHash, postWitness: post.roundHash, mirrorFiles: mirror.files?.length || 0, orthogonalArchive: archive } };
 }
 
 async function panic(reason = 'operator initiated panic') {
   const capsule = await savior.capsule('panic');
+  const dualCode = await orthogonal.archive('panic');
   const witness = await guardian.witnessRound('panic-capsule');
   const state = await savior.setMode('panic', reason);
-  return { state, capsule, witness: witness.roundHash };
+  return { state, capsule, orthogonal: dualCode, witness: witness.roundHash };
 }
 
 async function api(req, res, url) {
@@ -93,6 +106,14 @@ async function api(req, res, url) {
   }
 
   if (p === '/api/savior/capsule' && req.method === 'POST') return json(res, 201, await savior.capsule((await body(req)).label || 'manual'));
+  if (p === '/api/savior/orthogonal/archive' && req.method === 'POST') return json(res, 201, await orthogonal.archive((await body(req)).label || 'manual'));
+  if (p === '/api/savior/orthogonal/verify' && req.method === 'POST') return json(res, 200, await orthogonal.verify((await body(req)).id || null));
+  if (p === '/api/savior/orthogonal/restore' && req.method === 'POST') {
+    const b = await body(req);
+    const target = path.join(savior.root, 'restore-sandboxes', String(b.file || `orthogonal-${Date.now()}.json`).replace(/[^A-Za-z0-9_.-]/g, '_'));
+    return json(res, 201, await orthogonal.restore(target, b.id || null, { allowDegraded: b.allowDegraded === true }));
+  }
+
   if (p === '/api/savior/catalog/infer' && req.method === 'GET') return json(res, 200, await savior.inferCatalog());
   if (p === '/api/savior/catalog/rebuild-sandbox' && req.method === 'POST') return json(res, 201, await savior.rebuildCatalogFromWorld());
   if (p === '/api/savior/canary' && req.method === 'POST') return json(res, 200, await savior.canary());
@@ -107,7 +128,16 @@ async function api(req, res, url) {
   if (p === '/api/savior/query' && req.method === 'POST') return json(res, 200, await engine.query(await body(req)));
 
   if (p === '/api/savior/quantum/superpose' && req.method === 'POST') return json(res, 200, await quantum.superpose(await body(req)));
-  if (p === '/api/savior/quantum/collapse' && req.method === 'POST') return json(res, 200, await quantum.collapse(await body(req)));
+  if (p === '/api/savior/quantum/collapse' && req.method === 'POST') {
+    const spec = await body(req);
+    const result = await quantum.collapse(spec);
+    if (result.collapsed) {
+      await savior.captureMirrors();
+      await guardian.witnessRound('quantum-collapse');
+      if (String(spec.survivalLevel || '').toUpperCase() === 'MAXIMUM') result.orthogonalArchive = await orthogonal.archive(`quantum-${Date.now()}`);
+    }
+    return json(res, 200, result);
+  }
 
   if (p === '/api/savior/extinction-drill' && req.method === 'POST') return json(res, 200, await apocalypse.run(await body(req)));
   if (p === '/api/savior/black-swan' && req.method === 'POST') return json(res, 200, await apocalypse.impossibleMode(await body(req)));
@@ -147,10 +177,12 @@ async function main() {
   await savior.init();
   await guardian.init();
   await apocalypse.init();
+  await orthogonal.init();
   if (!(await readJson(guardian.latest, null))) {
     await savior.captureMirrors();
     await guardian.witnessRound('genesis');
     await savior.capsule('genesis');
+    await orthogonal.archive('genesis');
   }
 
   const server = http.createServer(async (req, res) => {
@@ -160,7 +192,7 @@ async function main() {
       else await serveStatic(res, url);
     } catch (error) {
       console.error('[SAVIOR]', error);
-      json(res, error.status || 500, { error: error.message, stack: process.env.JSONDB_DEBUG ? error.stack : undefined });
+      json(res, error.status || 500, { error: error.message, stack: process.env.JSONDB_DEBUG ? error.stack : undefined, committed: error.committed });
     }
   });
 
@@ -171,7 +203,7 @@ async function main() {
     console.log('╚════════════════════════════════════════════════════════════════╝');
     console.log(`Control plane : http://${HOST}:${PORT}`);
     console.log('Guardian      : quorum + temporal witnesses + circuit breaker');
-    console.log('ARK           : parity shards + quarantine + recovery capsules');
+    console.log('ARK           : XOR parity + GF(256) 6+3 orthogonal erasure coding');
     console.log('Quantum-ish   : triple execution + speculative world collapse');
     console.log('Apocalypse    : isolated destruction drills; canonical data untouched\n');
   });
