@@ -56,10 +56,11 @@ class TimeWeave {
     return body;
   }
 
-  async verifyNode(nodeOrId) {
-    await this.init();
+  async verifyNode(nodeOrId, options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const node = typeof nodeOrId === 'object' ? nodeOrId : await readJson(path.join(this.nodes, `${nodeOrId}.json`), null);
-    if (!node) return { valid: false, reason: 'node missing' };
+    if (!node) return { valid: false, status: 'ABSENT', readOnly, reason: 'node missing' };
     const copy = { ...node }; delete copy.weaveHash; delete copy.polyhash;
     const computed = digest(copy);
     const failures = [];
@@ -75,16 +76,33 @@ class TimeWeave {
     let polyhash = null;
     if (this.polyhash && node.polyhash) polyhash = await this.polyhash.verify({ ...copy, weaveHash: node.weaveHash }, node.polyhash);
     if (polyhash && !polyhash.valid) failures.push({ type: 'POLYHASH_INVALID' });
-    return { valid: failures.length === 0, epochId: node.epochId, position: node.position, failures, polyhash };
+    return { valid: failures.length === 0, status: failures.length ? 'INVALID' : 'VALID', readOnly, epochId: node.epochId, position: node.position, failures, polyhash };
   }
 
-  async verifyAll() {
-    await this.init();
-    const index = await readJson(this.indexFile, { nodes: [] });
+  async verifyAll(options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
+    const index = await readJson(this.indexFile, null);
+    if (!index) return { format: 'JSONDB-TIME-WEAVE-VERIFY-2', valid: false, status: 'ABSENT', readOnly, nodes: 0, invalid: [], results: [], indexFailures: [] };
     const results = [];
-    for (const spec of index.nodes) results.push(await this.verifyNode(spec.epochId));
+    const indexFailures = [];
+    const seen = new Set();
+    for (let i = 0; i < (index.nodes || []).length; i++) {
+      const spec = index.nodes[i];
+      if (spec.position !== i) indexFailures.push({ type: 'INDEX_POSITION', epochId: spec.epochId, expected: i, actual: spec.position });
+      if (!spec.epochId || seen.has(spec.epochId)) indexFailures.push({ type: 'INDEX_EPOCH_ID', epochId: spec.epochId, duplicate: seen.has(spec.epochId) });
+      seen.add(spec.epochId);
+      const result = await this.verifyNode(spec.epochId, { readOnly });
+      if (result.epochId && result.epochId !== spec.epochId) result.failures.push({ type: 'INDEX_NODE_ID_MISMATCH', expected: spec.epochId, actual: result.epochId });
+      const node = await readJson(path.join(this.nodes, `${spec.epochId}.json`), null);
+      if (node && (node.weaveHash !== spec.weaveHash || node.epochHash !== spec.epochHash || node.semanticWorldSha256 !== spec.semanticWorldSha256)) {
+        result.failures.push({ type: 'INDEX_NODE_SUMMARY_MISMATCH', expected: spec, actual: { position: node.position, epochId: node.epochId, epochHash: node.epochHash, weaveHash: node.weaveHash, semanticWorldSha256: node.semanticWorldSha256 } });
+      }
+      result.valid = result.failures.length === 0;
+      results.push(result);
+    }
     const invalid = results.filter(x => !x.valid);
-    return { format: 'JSONDB-TIME-WEAVE-VERIFY-1', valid: invalid.length === 0, nodes: results.length, invalid, results };
+    return { format: 'JSONDB-TIME-WEAVE-VERIFY-2', valid: invalid.length === 0 && indexFailures.length === 0, status: invalid.length || indexFailures.length ? 'INVALID' : 'VALID', readOnly, nodes: results.length, indexFailures, invalid, results };
   }
 
   async proof(fromEpochId, toEpochId = null) {
