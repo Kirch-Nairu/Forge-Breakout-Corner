@@ -135,6 +135,11 @@ class LastSaviorArchive {
       recoveryContractRegistryHash: contractRegistry.registryHash, recoveryContractAnalysisHash: digest(contractAnalysis),
       rosettaId: rosetta.id, civilizationSeedId: seed.id
     });
+    const bundleVerification = await this.k.diaspora.verifyBundle(bundle.id, { readOnly: true });
+    if (!bundleVerification.valid || !bundleVerification.copyCompletenessValid) {
+      const missing = (bundleVerification.copyChecks || []).filter(row => !row.valid).map(row => `${row.name || '<unnamed>'}:${row.status || 'INVALID'}`);
+      throw new Error(`LAST SAVIOR evidence bundle is not complete and intact: ${missing.join(', ') || 'bundle verification failed'}`);
+    }
 
     let diaspora = null;
     if (options.scatter !== false) {
@@ -183,6 +188,7 @@ class LastSaviorArchive {
     const forwardValid = Boolean(forwardChain.valid && forwardRecord?.valid && forwardRecord.subjectHash === receipt.coreHash && receipt.forwardWitness.subjectHash === receipt.coreHash && forwardRecord.attestationHash === receipt.forwardWitness.attestationHash);
     const evidenceBundleMatchesReceipt = Boolean(
       evidenceBundle.valid &&
+      evidenceBundle.copyCompletenessValid === true &&
       evidenceBundle.id === receipt.evidenceBundle?.id &&
       evidenceBundle.recordedMerkleRoot === receipt.evidenceBundle?.merkleRoot &&
       evidenceBundle.expectedBundleHash === receipt.evidenceBundle?.bundleHash
@@ -229,7 +235,7 @@ class LastSaviorArchive {
     const historicalValid = staticValid && coreValid && independent.federation && independent.rosetta && independent.civilizationSeed && independent.quaternary && independent.spacetime && independent.semanticFossil && independent.recoveryContractsAtArchive && independent.shadowLawRecord && independent.forwardWitness && independent.evidenceBundle && independent.polyhash && (independent.shadowLawLive !== false);
 
     return {
-      format: 'JSONDB-LAST-SAVIOR-VERIFY-11',
+      format: 'JSONDB-LAST-SAVIOR-VERIFY-12',
       id: receipt.id,
       valid: historicalValid,
       readOnly,
@@ -267,7 +273,7 @@ class LastSaviorArchive {
       evidenceBundle: { ...evidenceBundle, matchesReceipt: evidenceBundleMatchesReceipt },
       diaspora,
       polyhash,
-      doctrine: 'Historical archive validity is resolved against a freshly revalidated archived Recovery Contract constitution and the exact local Evidence Diaspora bundle named by the archive receipt. Later policy drift is reported separately and does not retroactively invalidate the archive. Physical scattering remains transport redundancy rather than historical validity. Read-only verification propagates through every archive evidence family and does not hydrate, repair, reconstruct-to-disk, or initialize trust state.'
+      doctrine: 'Historical archive validity is resolved against a freshly revalidated archived Recovery Contract constitution and the exact complete local Evidence Diaspora bundle named by the archive receipt. Generic Diaspora may preserve an honest partial bundle, but LAST SAVIOR will neither seal nor validate one. Later policy drift is reported separately and does not retroactively invalidate the archive. Physical scattering remains transport redundancy rather than historical validity. Read-only verification propagates through every archive evidence family and does not hydrate, repair, reconstruct-to-disk, or initialize trust state.'
     };
   }
 }
