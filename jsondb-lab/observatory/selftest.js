@@ -140,7 +140,10 @@ async function main() {
     assert(snapshotJson.authority === 'READ_ONLY_OBSERVER', 'Snapshot did not declare observer authority.');
 
     const html = await request('GET', '/');
-    assert(html.status === 200 && /OMEGA OBSERVATORY/.test(html.body), 'GUI shell was not served.');
+    assert(
+      html.status === 200 && /<title>OMEGA Observatory<\/title>/.test(html.body) && /<strong>OMEGA<\/strong>/.test(html.body) && /<span>OBSERVATORY<\/span>/.test(html.body),
+      'GUI shell was not served with the expected Observatory identity.'
+    );
     assert(String(html.headers['content-security-policy'] || '').includes("default-src 'self'"), 'CSP header missing.');
 
     const head = await request('HEAD', '/styles.css');
