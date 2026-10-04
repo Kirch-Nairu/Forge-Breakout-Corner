@@ -110,16 +110,17 @@ class StatePassportOffice {
   }
 
   async verify(id = null, options = {}) {
-    await this.init();
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const passport = id ? await readJson(path.join(this.passports, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!passport) return { valid: false, status: 'ABSENT' };
+    if (!passport) return { valid: false, status: 'ABSENT', readOnly };
     const copy = { ...passport }; delete copy.passportHash; delete copy.polyhash;
     const staticHash = digest(copy);
     const staticValid = staticHash === passport.passportHash;
     let polyhash = null;
     if (this.polyhash && passport.polyhash) {
       const envelopeTarget = { ...copy, passportHash: passport.passportHash };
-      polyhash = await this.polyhash.verify(envelopeTarget, passport.polyhash);
+      polyhash = await this.polyhash.verify(envelopeTarget, passport.polyhash, { readOnly });
     }
     let live = null;
     if (options.live === true) {
@@ -132,8 +133,9 @@ class StatePassportOffice {
       };
     }
     return {
-      format: 'JSONDB-STATE-PASSPORT-VERIFY-1', id: passport.id,
+      format: 'JSONDB-STATE-PASSPORT-VERIFY-2', id: passport.id,
       valid: staticValid && (!polyhash || polyhash.valid) && (!live || live.matchesPassport),
+      readOnly,
       staticValid, polyhash, live,
       confidenceClass: passport.confidenceClass,
       worldSemanticSha256: passport.worldSemanticSha256,
