@@ -249,18 +249,19 @@ class RosettaCapsule {
     return{id,directory:dir,merkleRoot:manifest.merkleRoot,files:entries.length+1};
   }
 
-  async verify(id=null){
-    await this.init();
+  async verify(id=null,options={}){
+    const readOnly=options.readOnly===true;
+    if(!readOnly)await this.init();
     if(!id)id=(await readJson(path.join(this.root,'latest.json'),null))?.id;
-    if(!id)return{valid:false,status:'ABSENT'};
+    if(!id)return{valid:false,status:'ABSENT',readOnly};
     const dir=path.join(this.capsules,id),manifest=await readJson(path.join(dir,'MANIFEST.json'),null);
-    if(!manifest)return{valid:false,status:'MISSING_MANIFEST'};
+    if(!manifest)return{valid:false,status:'MISSING_MANIFEST',readOnly,id};
     const results=[];
     for(const entry of manifest.entries||[]){try{const actual=await hashFile(path.join(dir,entry.path));results.push({path:entry.path,valid:actual===entry.sha256,expected:entry.sha256,actual});}catch(error){results.push({path:entry.path,valid:false,error:error.message});}}
     const root=merkleRoot((manifest.entries||[]).map(x=>x.sha256));
     let polyhash=null;
-    if(this.polyhash&&manifest.polyhash){const copy={...manifest};delete copy.polyhash;polyhash=await this.polyhash.verify(copy,manifest.polyhash);}
-    return{valid:results.every(x=>x.valid)&&root===manifest.merkleRoot&&(!polyhash||polyhash.valid),id,computedMerkleRoot:root,expectedMerkleRoot:manifest.merkleRoot,results,polyhash};
+    if(this.polyhash&&manifest.polyhash){const copy={...manifest};delete copy.polyhash;polyhash=await this.polyhash.verify(copy,manifest.polyhash,{readOnly});}
+    return{format:'JSONDB-ROSETTA-VERIFY-3',valid:results.every(x=>x.valid)&&root===manifest.merkleRoot&&(!polyhash||polyhash.valid),readOnly,id,computedMerkleRoot:root,expectedMerkleRoot:manifest.merkleRoot,results,polyhash};
   }
 }
 
