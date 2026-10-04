@@ -143,17 +143,18 @@ class CivilizationSeed {
     return { id, directory: dir, merkleRoot: manifest.merkleRoot, files: manifest.files, rescueRuntimes, references: Object.fromEntries(Object.entries(references).map(([k,v])=>[k,v?.id || v?.generation || null])) };
   }
 
-  async verify(id = null) {
-    await this.init();
+  async verify(id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     let dir;
     if (id) dir = path.join(this.root, id);
     else {
       const latest = await readJson(path.join(this.root, 'latest.json'), null);
-      if (!latest) return { valid: false, status: 'ABSENT' };
+      if (!latest) return { valid: false, status: 'ABSENT', readOnly };
       dir = latest.directory || path.join(this.root, latest.id);
     }
     const manifest = await readJson(path.join(dir, 'SEED-MANIFEST.json'), null);
-    if (!manifest) return { valid: false, status: 'MISSING_MANIFEST', directory: dir };
+    if (!manifest) return { valid: false, status: 'MISSING_MANIFEST', readOnly, directory: dir };
     const results = [];
     for (const entry of manifest.entries || []) {
       const file = path.join(dir, entry.path);
@@ -167,9 +168,9 @@ class CivilizationSeed {
     let polyhash = null;
     if (this.polyhash && manifest.polyhash) {
       const copy = { ...manifest }; delete copy.polyhash;
-      polyhash = await this.polyhash.verify(copy, manifest.polyhash);
+      polyhash = await this.polyhash.verify(copy, manifest.polyhash, { readOnly });
     }
-    return { valid: valid && (!polyhash || polyhash.valid), status: valid ? 'INTACT' : 'DAMAGED', directory: dir, merkleRoot: manifest.merkleRoot, computedMerkleRoot: root, results, polyhash, rescueRuntimes: manifest.rescueRuntimes || [] };
+    return { format: 'JSONDB-CIVILIZATION-SEED-VERIFY-3', valid: valid && (!polyhash || polyhash.valid), status: valid ? 'INTACT' : 'DAMAGED', readOnly, directory: dir, merkleRoot: manifest.merkleRoot, computedMerkleRoot: root, results, polyhash, rescueRuntimes: manifest.rescueRuntimes || [] };
   }
 }
 
