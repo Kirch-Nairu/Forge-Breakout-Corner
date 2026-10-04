@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>JSONDB SAVIOR MODE</title>
+<style>
+:root{--bg:#050807;--panel:#0c1210;--panel2:#111a16;--line:#24342c;--text:#ecf7f0;--muted:#82968b;--green:#6af0a2;--cyan:#62d9ff;--gold:#f2c75b;--red:#ff6f73;--violet:#bc8cff;font-family:Inter,ui-sans-serif,system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% 0,rgba(98,217,255,.08),transparent 30rem),radial-gradient(circle at 90% 20%,rgba(188,140,255,.07),transparent 28rem),var(--bg);color:var(--text)}.shell{width:min(1500px,calc(100% - 28px));margin:auto;padding:22px 0 50px}.top{display:flex;justify-content:space-between;gap:24px;align-items:flex-start}.eyebrow{font-size:11px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;color:var(--green)}h1{font-size:clamp(36px,7vw,78px);line-height:.88;letter-spacing:-.055em;margin:7px 0 0}.lede{max-width:800px;color:var(--muted);line-height:1.6}.badge{border:1px solid var(--line);padding:10px 13px;border-radius:999px;font-size:12px;color:var(--cyan);white-space:nowrap}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px;margin-top:18px}.card{grid-column:span 3;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.018),transparent),var(--panel);border-radius:18px;padding:16px;min-width:0}.wide{grid-column:span 6}.full{grid-column:1/-1}.card h2{margin:0 0 5px;font-size:14px}.hint{color:var(--muted);font-size:12px;line-height:1.5}.metric{font-size:30px;font-weight:900;letter-spacing:-.04em;margin-top:12px}.ok{color:var(--green)}.warn{color:var(--gold)}.bad{color:var(--red)}.controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}button{border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:9px 11px;border-radius:11px;cursor:pointer;font:inherit;font-size:12px;font-weight:800}button:hover{border-color:#476054}button.primary{background:var(--green);color:#041109;border-color:transparent}button.quantum{background:var(--violet);color:#110719;border-color:transparent}button.danger{color:var(--red)}button.gold{color:#211704;background:var(--gold);border-color:transparent}textarea{width:100%;min-height:310px;background:#070b09;color:#d8ece0;border:1px solid var(--line);border-radius:13px;padding:13px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical;outline:none}textarea:focus{border-color:var(--violet)}pre{margin:0;background:#060908;border:1px solid #1c2822;border-radius:13px;padding:14px;overflow:auto;max-height:560px;color:#cfe3d7;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}.statusline{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--muted)}.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}.dot.ok{background:var(--green);box-shadow:0 0 14px rgba(106,240,162,.55)}.section-title{grid-column:1/-1;margin:12px 0 -2px;color:#a9bbb1;font-size:11px;letter-spacing:.16em;text-transform:uppercase;font-weight:900}.log{min-height:320px}.footer{color:#56685e;text-align:center;font-size:11px;margin-top:18px;line-height:1.6}@media(max-width:1050px){.card{grid-column:span 6}}@media(max-width:680px){.top{flex-direction:column}.card,.wide{grid-column:1/-1}.badge{white-space:normal}}
+</style>
+</head>
+<body>
+<main class="shell">
+  <div class="top">
+    <div><div class="eyebrow">Forge Breakout Corner / Last Database on Earth</div><h1>SAVIOR<br>MODE</h1><p class="lede">Assume every disk can lie, every replica can rot, the catalog can disappear, the majority can become corrupted, and the only surviving persistence primitive is JSON. Then refuse to panic intelligently.</p></div>
+    <div class="badge">NOT QUANTUM COMPUTING · EXTREMELY QUANTUM-INSPIRED NONSENSE</div>
+  </div>
+
+  <section class="grid">
+    <div class="section-title">World health</div>
+    <article class="card"><h2>Circuit breaker</h2><div class="hint">Writes exist only while Savior believes the world is safe.</div><div class="metric" id="mode">—</div><div class="controls"><button onclick="mode('read-write')">Open writes</button><button onclick="mode('read-only')">Read only</button><button class="danger" onclick="panic()">PANIC</button></div></article>
+    <article class="card"><h2>Witness chain</h2><div class="hint">Hash-chained epochs of what the canonical world looked like.</div><div class="metric" id="epochs">—</div><div class="controls"><button onclick="act('/api/savior/witness',{label:'manual'})">Witness now</button><button onclick="act('/api/savior/witness/verify',{})">Verify chain</button></div></article>
+    <article class="card"><h2>Mirror world</h2><div class="hint">Five independent cells. Present quorum first; temporal lineage if the present is poisoned.</div><div class="metric" id="mirror">—</div><div class="controls"><button onclick="act('/api/savior/mirrors/capture',{})">Capture</button><button onclick="act('/api/savior/mirrors/scrub',{})">Scrub + repair</button></div></article>
+    <article class="card"><h2>Canary</h2><div class="hint">Write, fsync-ish path, hash, reread, delete. Tiny proof that the storage path can still tell the truth.</div><div class="metric" id="canary">?</div><div class="controls"><button onclick="act('/api/savior/canary',{})">Run canary</button><button class="primary" onclick="guardian()">Guardian sweep</button></div></article>
+
+    <div class="section-title">Survival systems</div>
+    <article class="card wide"><h2>ARK + Doomsday Capsule</h2><div class="hint">Canonical JSON + inferred schema + WAL evidence + Merkle manifest, then six data shards plus XOR parity. One destroyed shard can be reconstructed.</div><div class="controls"><button class="primary" onclick="act('/api/savior/capsule',{label:'operator'})">Forge capsule</button><button onclick="act('/api/savior/catalog/infer',null,'GET')">Infer schema from surviving rows</button><button onclick="act('/api/savior/catalog/rebuild-sandbox',{})">Rebuild catalog sandbox</button></div></article>
+    <article class="card wide"><h2>Extinction chamber</h2><div class="hint">Destroys disposable copies only. Canonical database is never fault-injected by this screen.</div><div class="controls"><button class="gold" onclick="act('/api/savior/extinction-drill',{dataShards:6,cells:5,corruptMirrors:2})">Run extinction drill</button><button class="danger" onclick="act('/api/savior/black-swan',{dataShards:6,cells:5,corruptMirrors:3})">Black Swan: exceed tolerance</button></div></article>
+
+    <div class="section-title">Worldline laboratory</div>
+    <article class="card wide"><h2>Quantum-inspired candidate universes</h2><div class="hint">Every candidate is independently executed three times. Divergent execution is disqualified. Invariants score the survivors. “Amplitude” is softmax ranking, not physics.</div><textarea id="quantum">{
+  "dryRun": true,
+  "operationPenalty": 0.1,
+  "invariants": [
+    {"type":"unique","collection":"tasks","field":"slug","weight":20},
+    {"type":"required","collection":"tasks","field":"title","weight":10},
+    {"type":"nonnegative","collection":"tasks","field":"priority","weight":5}
+  ],
+  "candidates": [
+    {"name":"safe-world","bias":1,"ops":[{"type":"insert","collection":"tasks","row":{"slug":"worldline-safe","title":"Survive the JSON apocalypse","status":"active","priority":1000}}]},
+    {"name":"cursed-world","ops":[{"type":"insert","collection":"tasks","row":{"slug":"worldline-cursed","title":"Negative priority timeline","status":"active","priority":-999}}]}
+  ]
+}</textarea><div class="controls"><button class="quantum" onclick="quantum(false)">Superpose / dry run</button><button class="primary" onclick="quantum(true)">COLLAPSE WINNER</button></div></article>
+    <article class="card wide"><h2>Mission log</h2><div class="hint">Every operator action lands here. We preserve the ugly truth instead of replacing failures with success theater.</div><pre id="out" class="log">SAVIOR control plane initializing…</pre></article>
+
+    <article class="card full"><h2>Current world snapshot</h2><div class="statusline"><span class="dot" id="dot"></span><span id="headline">connecting…</span></div><pre id="status">{}</pre></article>
+  </section>
+  <div class="footer">JSONDB SAVIOR is a deliberately absurd local engineering experiment. ARK parity is XOR parity, Temporal Quorum is a custom recovery heuristic, and quantum-inspired collapse is deterministic speculative execution. None of those labels imply production-grade distributed consensus, erasure coding, or quantum computation.</div>
+</main>
+<script>
+const out=document.querySelector('#out');const statusEl=document.querySelector('#status');
+async function req(url,opts={}){const r=await fetch(url,{headers:{'content-type':'application/json'},...opts});const data=await r.json();if(!r.ok)throw new Error(data.error||`HTTP ${r.status}`);return data}
+function show(label,data){out.textContent=`[${new Date().toLocaleTimeString()}] ${label}\n${JSON.stringify(data,null,2)}`}
+async function act(url,payload={},method='POST'){try{const data=method==='GET'?await req(url):await req(url,{method,body:JSON.stringify(payload||{})});show(url,data);await refresh();return data}catch(e){show(`FAIL ${url}`,{error:e.message});throw e}}
+async function refresh(){try{const s=await req('/api/savior/status');statusEl.textContent=JSON.stringify(s,null,2);document.querySelector('#mode').textContent=s.savior.mode;document.querySelector('#epochs').textContent=s.witnessChain.rounds??0;document.querySelector('#mirror').textContent=s.mirrorWorld.healthy?'STABLE':(s.mirrorWorld.temporalRecoveriesAvailable?'TEMPORAL':'UNKNOWN');document.querySelector('#dot').className=`dot ${s.savior.mode==='read-write'?'ok':''}`;document.querySelector('#headline').textContent=`${s.savior.mode} · tx ${s.engine?.meta?.nextTx??'?'} · LSN ${s.engine?.meta?.nextLsn??'?'}`;return s}catch(e){document.querySelector('#headline').textContent=e.message}}
+async function mode(m){return act('/api/savior/mode',{mode:m,reason:`operator selected ${m}`})}
+async function guardian(){const d=await act('/api/savior/guardian',{capture:true,autoFreeze:true});document.querySelector('#canary').textContent=d.canary?.ok?'PASS':'FAIL'}
+async function panic(){if(!confirm('Forge panic capsule and freeze the Savior control plane?'))return;return act('/api/savior/panic',{reason:'operator panic switch'})}
+async function quantum(commit){try{const spec=JSON.parse(document.querySelector('#quantum').value);spec.dryRun=!commit;return act(commit?'/api/savior/quantum/collapse':'/api/savior/quantum/superpose',spec)}catch(e){show('QUANTUM SPEC ERROR',{error:e.message})}}
+refresh();setInterval(refresh,5000);
+</script>
+</body>
+</html>
