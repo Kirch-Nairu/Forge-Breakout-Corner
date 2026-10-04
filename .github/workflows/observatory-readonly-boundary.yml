@@ -29,11 +29,16 @@ jobs:
         run: |
           set -euo pipefail
           node --check jsondb-lab/observatory/server.js
+          node --check jsondb-lab/observatory/server/history-adapter.js
+          node --check jsondb-lab/observatory/server/artifacts.js
           node --check jsondb-lab/observatory/selftest.js
           node --check jsondb-lab/observatory/public/app.js
           node --check jsondb-lab/observatory/public/index-lab.js
           node --check jsondb-lab/observatory/public/wal-theater.js
           node --check jsondb-lab/observatory/public/recovery-theater.js
+          node --check jsondb-lab/observatory/public/history-lab.js
+          node --check jsondb-lab/observatory/public/artifacts.js
+          node --check jsondb-lab/observatory/public/failure-lab.js
 
       - name: Bootstrap isolated JSONDB recovery state
         run: node jsondb-lab/recovery-selftest.js --bootstrap
