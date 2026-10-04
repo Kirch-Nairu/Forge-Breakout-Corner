@@ -120,7 +120,11 @@ class AuthorityFirewall {
     }
     const registry = await this.contracts.version(row.registryHash);
     if (!registry) return { valid: false, type: 'REGISTRY_VERSION_MISSING', registryHash: row.registryHash };
-    if (registry.registryHash !== row.registryHash) return { valid: false, type: 'REGISTRY_HASH_MISMATCH', expected: row.registryHash, actual: registry.registryHash };
+    const registryCopy = { ...registry }; delete registryCopy.registryHash;
+    const computedRegistryHash = digest(registryCopy);
+    if (computedRegistryHash !== row.registryHash || registry.registryHash !== row.registryHash) {
+      return { valid: false, type: 'REGISTRY_CONTENT_HASH_MISMATCH', expected: row.registryHash, declared: registry.registryHash, computed: computedRegistryHash };
+    }
     const historicalContract = registry.contracts?.[row.actor] || null;
     if (!historicalContract) return { valid: false, type: 'HISTORICAL_CONTRACT_MISSING', actor: row.actor, registryHash: row.registryHash };
     const historicalHash = digest(historicalContract);
@@ -135,17 +139,22 @@ class AuthorityFirewall {
     return { valid: true, legacy: false, registryHash: row.registryHash, contractHash: row.contractHash };
   }
 
-  async verifyLedger() {
+  async verifyPrefix(count = null) {
     await this.init();
-    const rows = await readJsonl(this.ledger);
+    const allRows = await readJsonl(this.ledger);
+    const requested = count == null ? allRows.length : Math.max(0, Number(count));
+    if (!Number.isInteger(requested)) return { format: 'JSONDB-AUTHORITY-FIREWALL-PREFIX-VERIFY-1', valid: false, type: 'INVALID_PREFIX_COUNT', requested: count };
+    if (requested > allRows.length) return { format: 'JSONDB-AUTHORITY-FIREWALL-PREFIX-VERIFY-1', valid: false, type: 'PREFIX_BEYOND_LEDGER', requested, available: allRows.length };
+    const rows = allRows.slice(0, requested);
     const failures = [];
     const warnings = [];
     let previous = null;
-    let sequence = 1;
     let replayed = 0;
     let legacy = 0;
-    for (const row of rows) {
-      if (row.__corrupt) { failures.push({ sequence, type: 'CORRUPT_JSONL' }); sequence++; continue; }
+    for (let i = 0; i < rows.length; i++) {
+      const sequence = i + 1;
+      const row = rows[i];
+      if (row.__corrupt) { failures.push({ sequence, type: 'CORRUPT_JSONL' }); continue; }
       const copy = { ...row }; delete copy.decisionHash;
       const actual = digest(copy);
       if (row.sequence !== sequence) failures.push({ sequence: row.sequence, type: 'SEQUENCE', expected: sequence });
@@ -156,20 +165,66 @@ class AuthorityFirewall {
       else if (policy.legacy) { legacy++; warnings.push({ sequence: row.sequence, type: 'LEGACY_UNBOUND_POLICY_DECISION', warning: policy.warning }); }
       else replayed++;
       previous = row.decisionHash;
-      sequence++;
     }
-    const head = await readJson(this.head, null);
-    if (head && head.decisionHash !== previous) failures.push({ type: 'HEAD_MISMATCH', expected: previous, actual: head.decisionHash });
     return {
-      format: 'JSONDB-AUTHORITY-FIREWALL-VERIFY-2',
+      format: 'JSONDB-AUTHORITY-FIREWALL-PREFIX-VERIFY-1',
       valid: failures.length === 0,
       fullyPolicyReplayable: failures.length === 0 && legacy === 0,
-      decisions: rows.length,
+      decisionsChecked: rows.length,
+      availableDecisions: allRows.length,
       policyReplayedDecisions: replayed,
       legacyUnboundDecisions: legacy,
       headHash: previous,
       failures,
       warnings
+    };
+  }
+
+  async verifyReferences(references = []) {
+    await this.init();
+    const refs = (references || []).filter(x => x && Number.isInteger(Number(x.sequence)) && x.decisionHash);
+    const maxSequence = refs.reduce((m, x) => Math.max(m, Number(x.sequence)), 0);
+    const prefix = await this.verifyPrefix(maxSequence);
+    if (!prefix.valid) return { format: 'JSONDB-AUTHORITY-FIREWALL-REFERENCE-VERIFY-1', valid: false, prefix, references: [] };
+    const ledger = await readJsonl(this.ledger);
+    const results = refs.map(ref => {
+      const sequence = Number(ref.sequence);
+      const row = ledger[sequence - 1];
+      return {
+        sequence,
+        expectedDecisionHash: ref.decisionHash,
+        actualDecisionHash: row && !row.__corrupt ? row.decisionHash : null,
+        actorMatches: !ref.actor || row?.actor === ref.actor,
+        actionMatches: !ref.action || row?.action === ref.action,
+        valid: Boolean(row && !row.__corrupt && row.decisionHash === ref.decisionHash && (!ref.actor || row.actor === ref.actor) && (!ref.action || row.action === ref.action))
+      };
+    });
+    return {
+      format: 'JSONDB-AUTHORITY-FIREWALL-REFERENCE-VERIFY-1',
+      valid: prefix.valid && results.every(x => x.valid),
+      prefix,
+      references: results,
+      maxSequence
+    };
+  }
+
+  async verifyLedger() {
+    await this.init();
+    const rows = await readJsonl(this.ledger);
+    const prefix = await this.verifyPrefix(rows.length);
+    const failures = [...(prefix.failures || [])];
+    const head = await readJson(this.head, null);
+    if (head && head.decisionHash !== prefix.headHash) failures.push({ type: 'HEAD_MISMATCH', expected: prefix.headHash, actual: head.decisionHash });
+    return {
+      format: 'JSONDB-AUTHORITY-FIREWALL-VERIFY-3',
+      valid: failures.length === 0,
+      fullyPolicyReplayable: failures.length === 0 && prefix.legacyUnboundDecisions === 0,
+      decisions: rows.length,
+      policyReplayedDecisions: prefix.policyReplayedDecisions,
+      legacyUnboundDecisions: prefix.legacyUnboundDecisions,
+      headHash: prefix.headHash,
+      failures,
+      warnings: prefix.warnings || []
     };
   }
 }
