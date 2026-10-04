@@ -34,25 +34,28 @@ class RecoveryJury {
     if (!archive) throw new Error('Recovery Jury requires a LAST SAVIOR archive as the evidence target.');
     const candidate = await this.candidate(candidateValue);
 
-    const canonical = await this.k.canonicalQuorum.verify(candidate.world, { freezeOnDivergence: false }).catch(error => ({ unanimous: false, error: error.message }));
+    // Jury deliberation may create a Jury case/attestation, but every evidence source it
+    // judges is opened forensically. Adjudication must never repair, initialize, or append
+    // to canonical database evidence while deciding whether a sandbox is trustworthy.
+    const canonical = await this.k.canonicalQuorum.verify(candidate.world, { freezeOnDivergence: false, readOnly: true }).catch(error => ({ unanimous: false, error: error.message }));
     const expectedSemantic = archive.world?.semanticSha256 || null;
     const exactSemantic = Boolean(canonical.unanimous && expectedSemantic && canonical.semanticSha256 === expectedSemantic);
 
     const hologramId = archive.corroborationFamilies?.semanticHologram?.id || null;
     const hologram = hologramId
-      ? await this.k.hologram.compare(candidate.world, hologramId).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message }))
+      ? await this.k.hologram.compare(candidate.world, hologramId, { readOnly: true }).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message }))
       : { status: 'ABSENT', confidence: 0 };
 
     const shadowLawId = archive.corroborationFamilies?.shadowLaws?.id || null;
     const shadowRecord = shadowLawId
-      ? await this.k.shadowLaws.verifyRecord(shadowLawId).catch(error => ({ valid: false, error: error.message }))
+      ? await this.k.shadowLaws.verifyRecord(shadowLawId, { readOnly: true }).catch(error => ({ valid: false, error: error.message }))
       : { valid: false, status: 'ABSENT' };
     const shadow = shadowRecord.valid
-      ? await this.k.shadowLaws.challenge(candidate.world, shadowLawId).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message }))
+      ? await this.k.shadowLaws.challenge(candidate.world, shadowLawId, { readOnly: true }).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message }))
       : { status: 'UNAVAILABLE', confidence: 0 };
 
-    const archiveCheck = await this.k.lastSavior.verify(archive.id, { live: false }).catch(error => ({ valid: false, error: error.message }));
-    const federation = await this.k.federation.verify(archive.world?.federationId || null, { live: false }).catch(error => ({ valid: false, error: error.message }));
+    const archiveCheck = await this.k.lastSavior.verify(archive.id, { live: false, readOnly: true }).catch(error => ({ valid: false, error: error.message }));
+    const federation = await this.k.federation.verify(archive.world?.federationId || null, { live: false, readOnly: true }).catch(error => ({ valid: false, error: error.message }));
 
     let ancestry = null;
     if (options.candidateCommit) {
@@ -102,7 +105,7 @@ class RecoveryJury {
       expectedSemanticSha256: expectedSemantic,
       candidateSemanticSha256: canonical.semanticSha256 || null,
       evidence, contradictions, ancestry,
-      doctrine: 'The Recovery Jury may reject, corroborate, or identify an exact candidate. It cannot promote candidate state into the canonical database.'
+      doctrine: 'The Recovery Jury may reject, corroborate, or identify an exact candidate. It cannot promote candidate state into the canonical database. Evidence adjudication is read-only.'
     };
     record.juryHash = digest(record);
     record.attestation = await this.k.cryptoCouncil.attest(record.juryHash, {
