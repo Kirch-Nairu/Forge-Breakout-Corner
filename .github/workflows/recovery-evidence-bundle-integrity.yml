@@ -1,0 +1,166 @@
+name: Recovery Evidence Bundle Integrity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'jsondb-lab/**'
+      - '.github/workflows/recovery-evidence-bundle-integrity.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recovery-evidence-bundle-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evidence-bundle-integrity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax-check evidence bundle lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check jsondb-lab/monster/evidencediaspora.js
+          node --check jsondb-lab/monster/lastsavior.js
+          node --check jsondb-lab/recovery-selftest.js
+
+      - name: Bootstrap recovery state
+        run: node jsondb-lab/recovery-selftest.js --bootstrap
+
+      - name: Prove local evidence bundle tamper detection is fail-closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fsp = require('fs/promises');
+          const path = require('path');
+          const crypto = require('crypto');
+          const { FederatedOmegaKernel } = require('./jsondb-lab/monster/federated-kernel');
+
+          function digest(value) {
+            return crypto.createHash('sha256').update(value).digest('hex');
+          }
+
+          async function main() {
+            const kernel = new FederatedOmegaKernel(path.join(process.cwd(), 'jsondb-lab'));
+            await kernel.init();
+
+            const archive = await kernel.lastSavior.create('ci-bundle-integrity', {
+              scatter: false,
+              deepMedia: false,
+              verifyArchives: false,
+              monteCarloIterations: 250,
+              syndromeChecksPerNode: 2,
+              shadowLawsPerCollection: 2,
+              hologramWidth: 16,
+              hologramProjections: 2,
+              oligoBytes: 128,
+              oligoGroupSize: 4,
+              spacetimeEpochs: 2,
+              spacetimeColumns: 2
+            });
+
+            const bundleId = archive?.evidenceBundle?.id;
+            if (!bundleId) throw new Error('LAST SAVIOR fixture did not reference an Evidence Diaspora bundle.');
+            const bundleDir = path.join(kernel.diaspora.bundles, bundleId);
+            const bundleBodyFile = path.join(bundleDir, 'BUNDLE.json');
+
+            const cleanBundle = await kernel.diaspora.verifyBundle(bundleId, { readOnly: true });
+            const cleanArchive = await kernel.lastSavior.verify(archive.id, { live: false, readOnly: true });
+            if (!cleanBundle.valid || !cleanArchive.valid || cleanArchive.independentEvidence?.evidenceBundle !== true) {
+              throw new Error('Clean Evidence Diaspora bundle or LAST SAVIOR archive failed baseline verification.');
+            }
+
+            const original = await fsp.readFile(bundleBodyFile);
+            const corrupted = Buffer.concat([original, Buffer.from('\nCI-EVIDENCE-BUNDLE-TAMPER\n')]);
+            let result;
+            try {
+              await fsp.writeFile(bundleBodyFile, corrupted);
+              const beforeVerify = await kernel.diaspora.manifest(bundleDir);
+
+              const damagedBundle = await kernel.diaspora.verifyBundle(bundleId, { readOnly: true });
+              const damagedArchive = await kernel.lastSavior.verify(archive.id, { live: false, readOnly: true });
+
+              const afterVerify = await kernel.diaspora.manifest(bundleDir);
+              const afterBody = await fsp.readFile(bundleBodyFile);
+              const noRepair = afterBody.equals(corrupted) && JSON.stringify(beforeVerify) === JSON.stringify(afterVerify);
+
+              const otherHistoricalChannelsHealthy = Object.entries(damagedArchive.independentEvidence || {})
+                .filter(([name, value]) => name !== 'evidenceBundle' && name !== 'recoveryContractsCurrentMatch' && name !== 'shadowLawLive' && typeof value === 'boolean')
+                .every(([, value]) => value === true);
+
+              const assertions = {
+                bundleRejected: damagedBundle.valid === false,
+                bundleManifestRejected: damagedBundle.manifestValid === false,
+                bundleRecordStaticHashStillValid: damagedBundle.staticValid === true,
+                bundlePolyhashStillValid: damagedBundle.polyhashValid === true,
+                lastSaviorRejected: damagedArchive.valid === false,
+                lastSaviorStaticReceiptStillValid: damagedArchive.staticValid === true,
+                lastSaviorCoreStillValid: damagedArchive.coreValid === true,
+                evidenceBundleChannelRejected: damagedArchive.independentEvidence?.evidenceBundle === false,
+                otherHistoricalChannelsHealthy,
+                verifierDidNotRepairOrRewrite: noRepair
+              };
+
+              result = {
+                archiveId: archive.id,
+                bundleId,
+                originalBundleBodySha256: digest(original),
+                corruptedBundleBodySha256: digest(corrupted),
+                bundle: {
+                  valid: damagedBundle.valid,
+                  staticValid: damagedBundle.staticValid,
+                  manifestValid: damagedBundle.manifestValid,
+                  polyhashValid: damagedBundle.polyhashValid,
+                  recordedMerkleRoot: damagedBundle.recordedMerkleRoot,
+                  computedMerkleRoot: damagedBundle.computedMerkleRoot
+                },
+                lastSavior: {
+                  valid: damagedArchive.valid,
+                  staticValid: damagedArchive.staticValid,
+                  coreValid: damagedArchive.coreValid,
+                  evidenceBundle: damagedArchive.independentEvidence?.evidenceBundle,
+                  healthyChannels: damagedArchive.healthyChannels,
+                  totalBooleanChannels: damagedArchive.totalBooleanChannels
+                },
+                assertions
+              };
+
+              const failed = Object.entries(assertions).filter(([, ok]) => !ok).map(([name]) => name);
+              if (failed.length) throw new Error(`Evidence bundle corruption assertions failed: ${failed.join(', ')}`);
+            } finally {
+              await fsp.writeFile(bundleBodyFile, original);
+            }
+
+            const restoredBundle = await kernel.diaspora.verifyBundle(bundleId, { readOnly: true });
+            const restoredArchive = await kernel.lastSavior.verify(archive.id, { live: false, readOnly: true });
+            result.restored = {
+              bundleValid: restoredBundle.valid,
+              archiveValid: restoredArchive.valid,
+              evidenceBundleChannel: restoredArchive.independentEvidence?.evidenceBundle
+            };
+            if (!restoredBundle.valid || !restoredArchive.valid || restoredArchive.independentEvidence?.evidenceBundle !== true) {
+              throw new Error('Evidence bundle fixture did not return to a valid state after restoring original bytes.');
+            }
+
+            process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+          }
+
+          main().catch(error => {
+            console.error(error.stack || error);
+            process.exitCode = 1;
+          });
+          NODE
