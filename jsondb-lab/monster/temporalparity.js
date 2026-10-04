@@ -84,14 +84,19 @@ class TemporalParityArchive {
     return manifest;
   }
 
-  async loadWindow(id = null) {
-    await this.init();
+  async loadWindow(id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     if (!id) id = (await readJson(path.join(this.root, 'latest.json'), null))?.id;
-    if (!id) throw new Error('No temporal parity window exists.');
+    if (!id) {
+      const error = new Error('No temporal parity window exists.');
+      error.code = 'TEMPORAL_PARITY_ABSENT';
+      throw error;
+    }
     const dir = path.join(this.windows, id);
     const manifest = await readJson(path.join(dir, 'manifest.json'), null);
     if (!manifest) throw new Error(`Temporal parity window not found: ${id}`);
-    return { id, dir, manifest };
+    return { id, dir, manifest, readOnly };
   }
 
   async parityBuffer(dir, name, expected) {
@@ -102,8 +107,9 @@ class TemporalParityArchive {
     return buf;
   }
 
-  async inspect(id = null) {
-    const { dir, manifest } = await this.loadWindow(id);
+  async inspect(id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    const { dir, manifest } = await this.loadWindow(id, { readOnly });
     const states = [];
     for (const spec of manifest.dataEpochs) {
       const file = path.join(this.epochDir, spec.file);
@@ -117,7 +123,7 @@ class TemporalParityArchive {
       try { parity.push({ ...spec, state: 'GOOD', buffer: await this.parityBuffer(dir, spec.file, spec.sha256) }); }
       catch (error) { parity.push({ ...spec, state: 'BAD', error: error.message, buffer: null }); }
     }
-    return { manifest, states, parity, damaged: states.filter(x => x.state !== 'GOOD').length };
+    return { manifest, states, parity, damaged: states.filter(x => x.state !== 'GOOD').length, readOnly };
   }
 
   recoverOne(states, p0, missing, shardSize) {
@@ -147,8 +153,6 @@ class TemporalParityArchive {
     if (!denom) throw new Error('Temporal parity coefficient collision.');
     const A = Buffer.alloc(shardSize), B = Buffer.alloc(shardSize);
     for (let j = 0; j < shardSize; j++) {
-      // A + B = s0 ; ca*A + cb*B = s1
-      // (ca+cb)A = s1 + cb*s0
       A[j] = div(s1[j] ^ mul(cb, s0[j]), denom);
       B[j] = s0[j] ^ A[j];
     }
