@@ -38,13 +38,13 @@ class RecoveryMutationAudit {
     return { classification: 'UNSAFE', safe: false, removedUsage, terminalPromotionDenied };
   }
 
-  async auditRow(row) {
+  async auditRow(row, options = {}) {
     const plan = await readJson(path.join(this.k.recoveryNavigator.plans, `${row.planId}.json`), null);
     if (!plan) return { valid: false, planId: row.planId, reason: 'PLAN_MISSING' };
     if (row.planHash && plan.planHash !== row.planHash) {
       return { valid: false, planId: row.planId, reason: 'PLAN_HASH_REFERENCE_MISMATCH', expected: row.planHash, actual: plan.planHash };
     }
-    const verified = await this.k.recoveryNavigator.verify(plan.id);
+    const verified = await this.k.recoveryNavigator.verify(plan.id, { readOnly: options.readOnly === true });
     const recomputed = this.classify(plan, verified.valid, row.removed || []);
     const matches = row.classification === recomputed.classification && Boolean(row.safe) === recomputed.safe && Boolean(row.terminalPromotionDenied) === recomputed.terminalPromotionDenied;
     return {
@@ -60,20 +60,21 @@ class RecoveryMutationAudit {
     };
   }
 
-  async verify(mutationId = null) {
-    await this.init();
+  async verify(mutationId = null, options = {}) {
+    if (options.readOnly !== true) await this.init();
     const mutation = mutationId
       ? await readJson(path.join(this.k.planMutation.records, `${mutationId}.json`), null)
       : await readJson(path.join(this.k.planMutation.root, 'latest.json'), null);
-    if (!mutation) return { valid: false, status: 'ABSENT' };
+    if (!mutation) return { valid: false, status: 'ABSENT', readOnly: options.readOnly === true };
 
-    const mutationBase = await this.k.planMutation.verify(mutation.id).catch(error => ({ valid: false, error: error.message }));
+    const readOnly = options.readOnly === true;
+    const mutationBase = await this.k.planMutation.verify(mutation.id, { readOnly }).catch(error => ({ valid: false, error: error.message }));
     const rows = [...(mutation.singles || []), ...(mutation.pairs || [])];
     const audits = [];
-    for (const row of rows) audits.push(await this.auditRow(row));
+    for (const row of rows) audits.push(await this.auditRow(row, { readOnly }));
 
     const baseline = await readJson(path.join(this.k.recoveryNavigator.plans, `${mutation.baseline?.planId}.json`), null);
-    const baselineVerify = baseline ? await this.k.recoveryNavigator.verify(baseline.id) : { valid: false };
+    const baselineVerify = baseline ? await this.k.recoveryNavigator.verify(baseline.id, { readOnly }) : { valid: false };
     const baselineValid = Boolean(
       baseline &&
       (!mutation.baseline?.planHash || baseline.planHash === mutation.baseline.planHash) &&
@@ -85,16 +86,17 @@ class RecoveryMutationAudit {
     const recomputedUnsafe = audits.filter(x => !x.recomputedSafe).length;
     const summaryMatches = Number(mutation.summary?.unsafe || 0) === recomputedUnsafe && Number(mutation.summary?.totalMutations || 0) === audits.length;
     return {
-      format: 'JSONDB-RECOVERY-MUTATION-AUDIT-2',
+      format: 'JSONDB-RECOVERY-MUTATION-AUDIT-3',
       mutationId: mutation.id,
       valid: mutationBase.valid === true && baselineValid && replayValid && summaryMatches && recomputedUnsafe === 0,
+      readOnly,
       mutationArtifactValid: mutationBase.valid === true,
       baselineValid,
       replayValid,
       summaryMatches,
       recomputedUnsafe,
       audits,
-      doctrine: 'Verification is read-only. Recorded mutation classifications are not trusted; every referenced Navigator plan is reopened and independently reclassified.'
+      doctrine: 'Verification is read-only when requested. Recorded mutation classifications are not trusted; every referenced Navigator plan is reopened and independently reclassified.'
     };
   }
 }
