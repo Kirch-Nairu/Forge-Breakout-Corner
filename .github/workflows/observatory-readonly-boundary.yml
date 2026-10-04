@@ -32,6 +32,8 @@ jobs:
           node --check jsondb-lab/observatory/selftest.js
           node --check jsondb-lab/observatory/public/app.js
           node --check jsondb-lab/observatory/public/index-lab.js
+          node --check jsondb-lab/observatory/public/wal-theater.js
+          node --check jsondb-lab/observatory/public/recovery-theater.js
 
       - name: Bootstrap isolated JSONDB recovery state
         run: node jsondb-lab/recovery-selftest.js --bootstrap
