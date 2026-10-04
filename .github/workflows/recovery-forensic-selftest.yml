@@ -73,5 +73,27 @@ jobs:
           });
           NODE
 
+      - name: Verify Last Savior fixture semantics
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const path = require('path');
+          const { FederatedOmegaKernel } = require('./jsondb-lab/monster/federated-kernel');
+
+          async function main() {
+            const kernel = new FederatedOmegaKernel(path.join(process.cwd(), 'jsondb-lab'));
+            const result = await kernel.lastSavior.verify(null, { live: false, readOnly: true });
+            process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+            if (!result.valid) process.exitCode = 1;
+          }
+
+          main().catch(error => {
+            console.error(error.stack || error);
+            process.exitCode = 1;
+          });
+          NODE
+
       - name: Verify forensic read-only recovery state
+        if: always()
         run: node jsondb-lab/recovery-selftest.js
