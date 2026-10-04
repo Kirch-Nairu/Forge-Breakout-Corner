@@ -93,25 +93,27 @@ class ShadowLawEngine {
     return record;
   }
 
-  async load(id = null) {
-    await this.init();
+  async load(id = null, options = {}) {
+    if (options.readOnly !== true) await this.init();
     return id ? readJson(path.join(this.records, `${id}.json`), null) : readJson(path.join(this.root, 'latest.json'), null);
   }
 
-  async verifyRecord(id = null) {
-    const record = await this.load(id);
-    if (!record) return { valid: false, status: 'ABSENT' };
+  async verifyRecord(id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    const record = await this.load(id, { readOnly });
+    if (!record) return { valid: false, status: 'ABSENT', readOnly };
     const actual = recordHash(record);
-    const attestation = record.attestation?.id ? await this.cryptoCouncil.verify(record.attestation.id).catch(error => ({ valid: false, error: error.message })) : { valid: false, error: 'missing attestation' };
+    const attestation = record.attestation?.id ? await this.cryptoCouncil.verify(record.attestation.id, { readOnly }).catch(error => ({ valid: false, error: error.message })) : { valid: false, error: 'missing attestation' };
     const sameAttestedRoot = attestation.worldRoot === record.recordHash;
-    return { valid: actual === record.recordHash && attestation.valid === true && sameAttestedRoot, id: record.id, expected: record.recordHash, actual, attestation, sameAttestedRoot };
+    return { format: 'JSONDB-SHADOW-LAWS-VERIFY-2', valid: actual === record.recordHash && attestation.valid === true && sameAttestedRoot, readOnly, id: record.id, expected: record.recordHash, actual, attestation, sameAttestedRoot };
   }
 
-  async challenge(world = null, id = null) {
-    const record = await this.load(id);
-    if (!record) return { status: 'ABSENT', confidence: 0 };
-    const recordCheck = await this.verifyRecord(record.id);
-    if (!recordCheck.valid) return { status: 'LAW_RECORD_UNTRUSTED', confidence: 0, recordCheck };
+  async challenge(world = null, id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    const record = await this.load(id, { readOnly });
+    if (!record) return { status: 'ABSENT', confidence: 0, readOnly };
+    const recordCheck = await this.verifyRecord(record.id, { readOnly });
+    if (!recordCheck.valid) return { status: 'LAW_RECORD_UNTRUSTED', confidence: 0, readOnly, recordCheck };
     const candidate = world || await this.liveWorld();
     const results = [];
     let total = 0, passed = 0;
@@ -127,9 +129,9 @@ class ShadowLawEngine {
     }
     const confidence = total ? Math.round(passed / total * 10000) / 100 : 100;
     return {
-      format: 'JSONDB-SHADOW-LAW-CHALLENGE-1', lawRecordId: record.id,
+      format: 'JSONDB-SHADOW-LAW-CHALLENGE-2', lawRecordId: record.id,
       status: passed === total ? 'SATISFIED' : passed ? 'PARTIAL_FAILURE' : 'FAILED',
-      confidence, passed, total, failed: results.filter(x=>!x.ok),
+      readOnly, confidence, passed, total, failed: results.filter(x=>!x.ok),
       doctrine: 'Shadow Laws are randomized corroboration. They may reject a candidate; satisfying them does not alone authorize promotion.'
     };
   }
