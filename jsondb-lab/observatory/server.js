@@ -3,6 +3,8 @@
 const http = require('http');
 const path = require('path');
 const fsp = require('fs/promises');
+const { historyMap } = require('./server/history-adapter');
+const { listArtifacts, readArtifact } = require('./server/artifacts');
 
 const HOST = process.env.OBSERVATORY_HOST || '127.0.0.1';
 const PORT = Number(process.env.OBSERVATORY_PORT || 7331);
@@ -20,10 +22,14 @@ const staticRoutes = new Map([
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/index-lab.css', ['index-lab.css', 'text/css; charset=utf-8']],
   ['/recovery-theater.css', ['recovery-theater.css', 'text/css; charset=utf-8']],
+  ['/advanced-theater.css', ['advanced-theater.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
   ['/index-lab.js', ['index-lab.js', 'text/javascript; charset=utf-8']],
   ['/wal-theater.js', ['wal-theater.js', 'text/javascript; charset=utf-8']],
-  ['/recovery-theater.js', ['recovery-theater.js', 'text/javascript; charset=utf-8']]
+  ['/recovery-theater.js', ['recovery-theater.js', 'text/javascript; charset=utf-8']],
+  ['/history-lab.js', ['history-lab.js', 'text/javascript; charset=utf-8']],
+  ['/artifacts.js', ['artifacts.js', 'text/javascript; charset=utf-8']],
+  ['/failure-lab.js', ['failure-lab.js', 'text/javascript; charset=utf-8']]
 ]);
 
 const observedSurfaces = [
@@ -122,11 +128,7 @@ function primitiveFieldOptions(rows) {
   }
   return [...stats.values()]
     .sort((a, b) => b.seen - a.seen || a.field.localeCompare(b.field))
-    .map(item => ({
-      field: item.field,
-      dominantType: ['number', 'string', 'boolean'].sort((a, b) => item[b] - item[a])[0],
-      observed: item.seen
-    }));
+    .map(item => ({ field: item.field, dominantType: ['number', 'string', 'boolean'].sort((a, b) => item[b] - item[a])[0], observed: item.seen }));
 }
 
 async function indexLab(collection) {
@@ -142,42 +144,20 @@ async function indexLab(collection) {
   const rows = Array.isArray(table.rows) ? table.rows.slice(0, 500) : [];
   const indexes = Object.entries(indexDoc?.indexes || {}).map(([name, idx]) => {
     const buckets = Object.entries(idx.map || {}).map(([key, rowIds]) => ({ key, rowIds }));
-    return {
-      name,
-      fields: idx.fields || [],
-      unique: Boolean(idx.unique),
-      distinct: Number(idx.distinct ?? buckets.length),
-      bucketCount: buckets.length,
-      buckets: buckets.slice(0, 500)
-    };
+    return { name, fields: idx.fields || [], unique: Boolean(idx.unique), distinct: Number(idx.distinct ?? buckets.length), bucketCount: buckets.length, buckets: buckets.slice(0, 500) };
   });
   return {
     status: 200,
     body: {
-      format: 'JSONDB-OMEGA-OBSERVATORY-INDEX-LAB-1',
-      observedAt: new Date().toISOString(),
-      authority: 'READ_ONLY_OBSERVER',
-      collection,
+      format: 'JSONDB-OMEGA-OBSERVATORY-INDEX-LAB-1', observedAt: new Date().toISOString(), authority: 'READ_ONLY_OBSERVER', collection,
       truth: {
         engineIndexStructure: 'HASH_MAP',
         actualBuildSemantics: 'For every table row, encode configured index field value(s) into a key and append row.id to that key bucket.',
-        persistedArtifact: `indexes/${collection}.json`,
-        sortAnimation: 'EXPLAIN_ONLY',
+        persistedArtifact: `indexes/${collection}.json`, sortAnimation: 'EXPLAIN_ONLY',
         sortWarning: 'The engine does not sort rows to build this index. Sorting animations use real rows but execute only in browser memory.'
       },
-      table: {
-        rowCount: Number(table.meta?.rows ?? rows.length),
-        revision: Number(table.meta?.revision || 0),
-        lastTx: Number(table.meta?.lastTx || 0),
-        rowsTruncated: Array.isArray(table.rows) && table.rows.length > rows.length,
-        rows
-      },
-      indexArtifact: indexDoc ? {
-        builtAt: indexDoc.builtAt || null,
-        tx: Number(indexDoc.tx || 0),
-        rowCount: Number(indexDoc.rowCount || 0),
-        indexes
-      } : { builtAt: null, tx: 0, rowCount: 0, indexes: [] },
+      table: { rowCount: Number(table.meta?.rows ?? rows.length), revision: Number(table.meta?.revision || 0), lastTx: Number(table.meta?.lastTx || 0), rowsTruncated: Array.isArray(table.rows) && table.rows.length > rows.length, rows },
+      indexArtifact: indexDoc ? { builtAt: indexDoc.builtAt || null, tx: Number(indexDoc.tx || 0), rowCount: Number(indexDoc.rowCount || 0), indexes } : { builtAt: null, tx: 0, rowCount: 0, indexes: [] },
       sortFields: primitiveFieldOptions(rows)
     }
   };
@@ -228,42 +208,23 @@ async function recoveryGraph() {
     id: contract.id,
     label: contract.id.replace(/-/g, ' '),
     kind: contract.kind || 'unknown',
-    reconstructs: contract.reconstructs || [],
-    corroborates: contract.corroborates || [],
-    dependencies: contract.dependencies || [],
-    mayNominate: Boolean(contract.mayNominate),
-    mayAuthorize: Boolean(contract.mayAuthorize),
-    mayPromoteCanonical: Boolean(contract.mayPromoteCanonical),
+    reconstructs: contract.reconstructs || [], corroborates: contract.corroborates || [], dependencies: contract.dependencies || [],
+    mayNominate: Boolean(contract.mayNominate), mayAuthorize: Boolean(contract.mayAuthorize), mayPromoteCanonical: Boolean(contract.mayPromoteCanonical),
     present: contractPresent(contract.id, archive, heads)
   }));
-  if (!nodes.some(node => node.id === 'last-savior')) {
-    nodes.push({ id: 'last-savior', label: 'LAST SAVIOR', kind: 'orchestrator', reconstructs: [], corroborates: ['cross-family-consistency'], dependencies: [], mayNominate: false, mayAuthorize: false, mayPromoteCanonical: false, present: Boolean(archive) });
-  }
+  if (!nodes.some(node => node.id === 'last-savior')) nodes.push({ id: 'last-savior', label: 'LAST SAVIOR', kind: 'orchestrator', reconstructs: [], corroborates: ['cross-family-consistency'], dependencies: [], mayNominate: false, mayAuthorize: false, mayPromoteCanonical: false, present: Boolean(archive) });
   const ids = new Set(nodes.map(node => node.id));
   const edges = [];
+  for (const node of nodes) for (const dependency of node.dependencies || []) if (ids.has(dependency)) edges.push({ from: dependency, to: node.id, relation: 'depends-on' });
   for (const node of nodes) {
-    for (const dependency of node.dependencies || []) {
-      if (ids.has(dependency)) edges.push({ from: dependency, to: node.id, relation: 'depends-on' });
-    }
-  }
-  for (const node of nodes) {
-    if (node.id !== 'last-savior' && node.present && !edges.some(edge => edge.to === 'last-savior' && edge.from === node.id)) {
-      const archiveRelated = ['memory-palace','trinity-ark','quaternary-cold-codec','fountain-ark','temporal-parity','spacetime-ark','semantic-delta-fossils','semantic-hologram','shadow-laws','time-weave','crypto-council','cross-history-braid','forward-witness','recovery-contracts','rosetta-capsule','civilization-seed'].includes(node.id);
-      if (archiveRelated) edges.push({ from: node.id, to: 'last-savior', relation: 'sealed-in-archive' });
-    }
+    if (node.id === 'last-savior' || !node.present) continue;
+    if (['memory-palace','trinity-ark','quaternary-cold-codec','fountain-ark','temporal-parity','spacetime-ark','semantic-delta-fossils','semantic-hologram','shadow-laws','time-weave','crypto-council','cross-history-braid','forward-witness','recovery-contracts','rosetta-capsule','civilization-seed'].includes(node.id)) edges.push({ from: node.id, to: 'last-savior', relation: 'sealed-in-archive' });
   }
   return {
-    format: 'JSONDB-OMEGA-OBSERVATORY-RECOVERY-GRAPH-1',
-    observedAt: new Date().toISOString(),
-    authority: 'READ_ONLY_OBSERVER',
-    contracts: {
-      registryHash: registry.registryHash || null,
-      valid: analysis?.valid ?? null,
-      violations: analysis?.violations?.length || 0
-    },
+    format: 'JSONDB-OMEGA-OBSERVATORY-RECOVERY-GRAPH-1', observedAt: new Date().toISOString(), authority: 'READ_ONLY_OBSERVER',
+    contracts: { registryHash: registry.registryHash || null, valid: analysis?.valid ?? null, violations: analysis?.violations?.length || 0 },
     archive: archive ? { id: archive.id, archiveHash: archive.archiveHash, createdAt: archive.createdAt } : null,
-    nodes,
-    edges
+    nodes, edges
   };
 }
 
@@ -273,22 +234,8 @@ async function authorityLedger() {
     tailJsonl(path.join(saviorRoot, 'authority-firewall', 'decisions.jsonl'), 120, 768 * 1024)
   ]);
   return {
-    format: 'JSONDB-OMEGA-OBSERVATORY-AUTHORITY-LEDGER-1',
-    observedAt: new Date().toISOString(),
-    authority: 'READ_ONLY_OBSERVER',
-    head,
-    headHash: head?.decisionHash || null,
-    decisions: decisions.filter(row => !row.__unparsed).map(row => ({
-      sequence: row.sequence,
-      at: row.at,
-      actor: row.actor,
-      action: row.action,
-      allowed: row.allowed,
-      reason: row.reason,
-      decisionHash: row.decisionHash,
-      previousDecisionHash: row.previousDecisionHash,
-      registryHash: row.recoveryContractRegistryHash || null
-    }))
+    format: 'JSONDB-OMEGA-OBSERVATORY-AUTHORITY-LEDGER-1', observedAt: new Date().toISOString(), authority: 'READ_ONLY_OBSERVER', head, headHash: head?.decisionHash || null,
+    decisions: decisions.filter(row => !row.__unparsed).map(row => ({ sequence: row.sequence, at: row.at, actor: row.actor, action: row.action, allowed: row.allowed, reason: row.reason, decisionHash: row.decisionHash, previousDecisionHash: row.previousDecisionHash, registryHash: row.recoveryContractRegistryHash || null }))
   };
 }
 
@@ -304,55 +251,17 @@ async function snapshot() {
   ]);
   const collections = await collectionSummaries(catalog);
   return {
-    format: 'JSONDB-OMEGA-OBSERVATORY-SNAPSHOT-1',
-    observedAt: new Date().toISOString(),
-    authority: 'READ_ONLY_OBSERVER',
-    engine: {
-      present: await exists(dataRoot),
-      version: meta?.engineVersion || null,
-      nextTx: meta?.nextTx || 1,
-      nextLsn: meta?.nextLsn || 1,
-      currentLsn: Math.max(0, Number(meta?.nextLsn || 1) - 1),
-      checkpointLsn: Number(meta?.checkpointLsn || 0),
-      collections: collections.length,
-      rows: collections.reduce((sum, item) => sum + item.rows, 0)
-    },
-    collections,
-    wal,
-    savior: saviorState ? {
-      present: true,
-      mode: saviorState.mode || 'unknown',
-      reason: saviorState.reason || null,
-      since: saviorState.at || saviorState.since || null
-    } : { present: false, mode: 'absent', reason: null, since: null },
-    lastSavior: lastSavior ? {
-      present: true,
-      id: lastSavior.id,
-      createdAt: lastSavior.createdAt,
-      archiveHash: lastSavior.archiveHash,
-      semanticSha256: lastSavior.world?.semanticSha256 || null,
-      format: lastSavior.format
-    } : { present: false },
-    recoveryContracts: contractAnalysis ? {
-      present: true,
-      valid: contractAnalysis.valid,
-      contracts: contractAnalysis.summary?.contracts || 0,
-      violations: contractAnalysis.violations?.length || 0
-    } : { present: false },
-    firewall: firewallHead ? {
-      present: true,
-      sequence: firewallHead.sequence || 0,
-      decisionHash: firewallHead.decisionHash || null,
-      actor: firewallHead.actor || null,
-      action: firewallHead.action || null,
-      allowed: firewallHead.allowed
-    } : { present: false, sequence: 0 }
+    format: 'JSONDB-OMEGA-OBSERVATORY-SNAPSHOT-1', observedAt: new Date().toISOString(), authority: 'READ_ONLY_OBSERVER',
+    engine: { present: await exists(dataRoot), version: meta?.engineVersion || null, nextTx: meta?.nextTx || 1, nextLsn: meta?.nextLsn || 1, currentLsn: Math.max(0, Number(meta?.nextLsn || 1) - 1), checkpointLsn: Number(meta?.checkpointLsn || 0), collections: collections.length, rows: collections.reduce((sum, item) => sum + item.rows, 0) },
+    collections, wal,
+    savior: saviorState ? { present: true, mode: saviorState.mode || 'unknown', reason: saviorState.reason || null, since: saviorState.at || saviorState.since || null } : { present: false, mode: 'absent', reason: null, since: null },
+    lastSavior: lastSavior ? { present: true, id: lastSavior.id, createdAt: lastSavior.createdAt, archiveHash: lastSavior.archiveHash, semanticSha256: lastSavior.world?.semanticSha256 || null, format: lastSavior.format } : { present: false },
+    recoveryContracts: contractAnalysis ? { present: true, valid: contractAnalysis.valid, contracts: contractAnalysis.summary?.contracts || 0, violations: contractAnalysis.violations?.length || 0 } : { present: false },
+    firewall: firewallHead ? { present: true, sequence: firewallHead.sequence || 0, decisionHash: firewallHead.decisionHash || null, actor: firewallHead.actor || null, action: firewallHead.action || null, allowed: firewallHead.allowed } : { present: false, sequence: 0 }
   };
 }
 
-function relativeObserved(file) {
-  return path.relative(dataRoot, file).split(path.sep).join('/');
-}
+function relativeObserved(file) { return path.relative(dataRoot, file).split(path.sep).join('/'); }
 
 async function scanPath(target, out, budget) {
   if (budget.count >= budget.max) return;
@@ -362,10 +271,7 @@ async function scanPath(target, out, budget) {
   if (stat.isDirectory()) {
     let entries;
     try { entries = await fsp.readdir(target, { withFileTypes: true }); } catch { return; }
-    for (const entry of entries) {
-      if (budget.count >= budget.max) break;
-      await scanPath(path.join(target, entry.name), out, budget);
-    }
+    for (const entry of entries) { if (budget.count >= budget.max) break; await scanPath(path.join(target, entry.name), out, budget); }
     return;
   }
   if (!stat.isFile()) return;
@@ -394,17 +300,9 @@ function classify(rel, mutation) {
 }
 
 function publish(event) {
-  const full = {
-    format: 'JSONDB-OMEGA-OBSERVATORY-EVENT-1',
-    id: `obs-${String(++eventSequence).padStart(10, '0')}`,
-    time: new Date().toISOString(),
-    mode: 'LIVE',
-    ...event
-  };
+  const full = { format: 'JSONDB-OMEGA-OBSERVATORY-EVENT-1', id: `obs-${String(++eventSequence).padStart(10, '0')}`, time: new Date().toISOString(), mode: 'LIVE', ...event };
   const payload = `id: ${full.id}\nevent: observation\ndata: ${JSON.stringify(full)}\n\n`;
-  for (const res of clients) {
-    try { res.write(payload); } catch { clients.delete(res); }
-  }
+  for (const res of clients) { try { res.write(payload); } catch { clients.delete(res); } }
 }
 
 async function poll() {
@@ -432,9 +330,7 @@ async function serveStatic(req, res, pathname) {
     const body = await fsp.readFile(path.join(publicRoot, name));
     res.writeHead(200, securityHeaders({ 'Content-Type': contentType, 'Content-Length': body.length }));
     if (req.method === 'HEAD') res.end(); else res.end(body);
-  } catch (error) {
-    sendJson(res, 500, { error: 'STATIC_ASSET_UNAVAILABLE', detail: error.message });
-  }
+  } catch (error) { sendJson(res, 500, { error: 'STATIC_ASSET_UNAVAILABLE', detail: error.message }); }
   return true;
 }
 
@@ -446,37 +342,23 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 405, { error: 'READ_ONLY_OBSERVER', message: 'OMEGA Observatory exposes no mutation methods.' });
     }
     if (await serveStatic(req, res, url.pathname)) return;
-    if (url.pathname === '/api/health') return sendJson(res, 200, {
-      format: 'JSONDB-OMEGA-OBSERVATORY-HEALTH-1',
-      ok: true,
-      authority: 'READ_ONLY_OBSERVER',
-      host: HOST,
-      port: PORT,
-      scanMs: SCAN_MS,
-      clients: clients.size
-    });
+    if (url.pathname === '/api/health') return sendJson(res, 200, { format: 'JSONDB-OMEGA-OBSERVATORY-HEALTH-1', ok: true, authority: 'READ_ONLY_OBSERVER', host: HOST, port: PORT, scanMs: SCAN_MS, clients: clients.size });
     if (url.pathname === '/api/snapshot') return sendJson(res, 200, await snapshot());
-    if (url.pathname === '/api/index-lab') {
-      const result = await indexLab(url.searchParams.get('collection'));
-      return sendJson(res, result.status, result.body);
-    }
+    if (url.pathname === '/api/index-lab') { const result = await indexLab(url.searchParams.get('collection')); return sendJson(res, result.status, result.body); }
     if (url.pathname === '/api/recovery-graph') return sendJson(res, 200, await recoveryGraph());
     if (url.pathname === '/api/authority-ledger') return sendJson(res, 200, await authorityLedger());
+    if (url.pathname === '/api/history-map') return sendJson(res, 200, await historyMap(saviorRoot));
+    if (url.pathname === '/api/artifacts') return sendJson(res, 200, await listArtifacts(dataRoot, observedSurfaces));
+    if (url.pathname === '/api/artifact') { const result = await readArtifact(dataRoot, observedSurfaces, url.searchParams.get('id')); return sendJson(res, result.status, result.body); }
     if (url.pathname === '/api/events') {
-      res.writeHead(200, securityHeaders({
-        'Content-Type': 'text/event-stream; charset=utf-8',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no'
-      }));
+      res.writeHead(200, securityHeaders({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Connection': 'keep-alive', 'X-Accel-Buffering': 'no' }));
       res.write(`event: hello\ndata: ${JSON.stringify({ mode: 'LIVE', authority: 'READ_ONLY_OBSERVER', at: new Date().toISOString() })}\n\n`);
       clients.add(res);
       req.on('close', () => clients.delete(res));
       return;
     }
     return sendJson(res, 404, { error: 'NOT_FOUND' });
-  } catch (error) {
-    return sendJson(res, 500, { error: 'OBSERVATORY_FAILURE', detail: error.message });
-  }
+  } catch (error) { return sendJson(res, 500, { error: 'OBSERVATORY_FAILURE', detail: error.message }); }
 });
 
 server.listen(PORT, HOST, async () => {
