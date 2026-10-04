@@ -93,7 +93,7 @@ class OmegaFederation {
       hologram = {
         present: Boolean(record),
         hashMatchesReceipt: Boolean(record && record.hologramHash === receipt.semanticHologram.hologramHash),
-        liveComparison: options.live === true && record ? await this.hologram.compare(null, record.id).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message })) : null
+        liveComparison: options.live === true && record ? await this.hologram.compare(null, record.id, { readOnly }).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message })) : null
       };
     }
     let polyhash = null;
@@ -101,7 +101,7 @@ class OmegaFederation {
     const parityHealthy = !parity || Number(parity.damaged || 0) <= 2;
     const hologramHealthy = !receipt.semanticHologram || (hologram?.present && hologram?.hashMatchesReceipt);
     return {
-      format: 'JSONDB-OMEGA-FEDERATION-VERIFY-3', id: receipt.id,
+      format: 'JSONDB-OMEGA-FEDERATION-VERIFY-4', id: receipt.id,
       valid: computed === receipt.federationHash && epoch.valid === true && weave.valid === true && parityHealthy && hologramHealthy && (!court || court.valid === true) && (!polyhash || polyhash.valid),
       readOnly,
       staticValid: computed === receipt.federationHash,
