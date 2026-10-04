@@ -11,7 +11,7 @@ function flag(args, name) { return args.includes(name); }
 function nonflags(args) { return args.filter(x => !x.startsWith('--')); }
 
 function usage() {
-  console.log(`JSONDB OMEGA FEDERATION CLI\n\n  status [--deep]\n\nEPOCHS\n  epoch-seal [label] [--deep-media] [--verify-archives]\n  epoch-verify [id] [--live]\n\nFEDERATION\n  federation-seal [label] [--compare=<ref>] [--merge-preview] [--window=N]\n  federation-verify [id] [--live]\n  continuity-proof <fromEpochId> [toEpochId]\n\nTIME WEAVE\n  weave-verify\n  weave-proof <fromEpochId> [toEpochId]\n\nTEMPORAL PARITY\n  parity-seal [window]\n  parity-inspect [id]\n  parity-recover [id] [--repair-in-place]\n\nHISTORY COURT\n  court <lineageA> <lineageB> [--merge-preview]\n  court-verify [id]\n\nQUATERNARY COLD STORAGE\n  quaternary-archive [label] [oligoBytes] [groupSize]\n  quaternary-recover [generation]\n  quaternary-restore <output-file> [generation]\n\nROSETTA RECOVERY SPEC\n  rosetta-create [label]\n  rosetta-verify [id]\n\nEVIDENCE DIASPORA\n  diaspora-bundle [label]\n  diaspora-scatter [bundleId] [copies]\n  diaspora-verify [placementId]\n\nLAST SAVIOR\n  last-savior [label] [--no-scatter] [--verify-archives]\n  last-savior-verify [id] [--live]\n\nNo npm. No package manager. No external database.\nHistory may be reconstructed into sandboxes; ambiguity is preserved instead of silently collapsed.\n`);
+  console.log(`JSONDB OMEGA FEDERATION CLI\n\n  status [--deep]\n\nEPOCHS\n  epoch-seal [label] [--deep-media] [--verify-archives]\n  epoch-verify [id] [--live]\n\nFEDERATION\n  federation-seal [label] [--compare=<ref>] [--merge-preview] [--window=N]\n  federation-verify [id] [--live]\n  continuity-proof <fromEpochId> [toEpochId]\n\nTIME WEAVE / FORWARD WITNESS\n  weave-verify\n  weave-proof <fromEpochId> [toEpochId]\n  forward-witness <subjectHash> [label]\n  forward-witness-verify\n\nTEMPORAL PARITY\n  parity-seal [window]\n  parity-inspect [id]\n  parity-recover [id] [--repair-in-place]\n\nHISTORY COURT\n  court <lineageA> <lineageB> [--merge-preview]\n  court-verify [id]\n\nCORROBORATION\n  shadow-capture [label] [lawsPerCollection]\n  shadow-challenge [id]\n  hologram-capture [label]\n  hologram-compare [id]\n\nRECOVERY JURY / PROMOTION GATE\n  jury <candidate-world.json> [archiveId]\n  jury-verify [juryId]\n  jury-open-promotion [juryId] [expiresMinutes]\n  jury-gate-verify [warrantId]\n\nQUATERNARY COLD STORAGE\n  quaternary-archive [label] [oligoBytes] [groupSize]\n  quaternary-recover [generation]\n  quaternary-restore <output-file> [generation]\n\nROSETTA RECOVERY SPEC\n  rosetta-create [label]\n  rosetta-verify [id]\n\nEVIDENCE DIASPORA\n  diaspora-bundle [label]\n  diaspora-scatter [bundleId] [copies]\n  diaspora-verify [placementId]\n\nLAST SAVIOR\n  last-savior [label] [--no-scatter] [--verify-archives]\n  last-savior-verify [id] [--live]\n\nNo npm. No package manager. No external database.\nHistory may be reconstructed into sandboxes; ambiguity is preserved instead of silently collapsed.\n`);
 }
 
 async function latestEvidenceSources() {
@@ -22,6 +22,8 @@ async function latestEvidenceSources() {
   await add('TIME-WEAVE.json', path.join(kernel.timeWeave.root, 'latest.json'));
   await add('TEMPORAL-PARITY.json', path.join(kernel.temporalParity.root, 'latest.json'));
   await add('SEMANTIC-HOLOGRAM.json', path.join(kernel.hologram.root, 'latest.json'));
+  await add('SHADOW-LAWS.json', path.join(kernel.shadowLaws.root, 'latest.json'));
+  await add('FORWARD-WITNESS.json', path.join(kernel.forwardWitness.root, 'latest.json'));
   await add('HISTORY-COURT.json', path.join(kernel.historyCourt.root, 'latest.json'));
   await add('CIVILIZATION-SEED.json', path.join(kernel.civilizationSeed.root, 'latest.json'));
   await add('ROSETTA.json', path.join(kernel.rosetta.root, 'latest.json'));
@@ -57,6 +59,8 @@ async function main() {
 
   if (cmd === 'weave-verify') return out(await kernel.timeWeave.verifyAll());
   if (cmd === 'weave-proof') return out(await kernel.timeWeave.proof(plain[0], plain[1] || null));
+  if (cmd === 'forward-witness') return out(await kernel.forwardWitness.attest(plain[0], { label: plain[1] || 'federated-cli' }));
+  if (cmd === 'forward-witness-verify') return out(await kernel.forwardWitness.verifyAll());
 
   if (cmd === 'parity-seal') return out(await kernel.temporalParity.seal({ window: Number(plain[0] || 8) }));
   if (cmd === 'parity-inspect') {
@@ -69,6 +73,16 @@ async function main() {
 
   if (cmd === 'court') return out(await kernel.historyCourt.compare(plain[0], plain[1], { previewMerge: flag(args, '--merge-preview') }));
   if (cmd === 'court-verify') return out(await kernel.historyCourt.verify(plain[0] || null));
+
+  if (cmd === 'shadow-capture') return out(await kernel.shadowLaws.capture(plain[0] || 'federated-cli', { lawsPerCollection: Number(plain[1] || 12) }));
+  if (cmd === 'shadow-challenge') return out(await kernel.shadowLaws.challenge(null, plain[0] || null));
+  if (cmd === 'hologram-capture') return out(await kernel.hologram.capture(plain[0] || 'federated-cli'));
+  if (cmd === 'hologram-compare') return out(await kernel.hologram.compare(null, plain[0] || null));
+
+  if (cmd === 'jury') return out(await kernel.recoveryJury.deliberate(path.resolve(plain[0]), { archiveId: plain[1] || null }));
+  if (cmd === 'jury-verify') return out(await kernel.recoveryJury.verify(plain[0] || null));
+  if (cmd === 'jury-open-promotion') return out(await kernel.juryGate.open(plain[0] || null, { expiresMinutes: Number(plain[1] || 60) }));
+  if (cmd === 'jury-gate-verify') return out(await kernel.juryGate.verify(plain[0] || null));
 
   if (cmd === 'quaternary-archive') return out(await kernel.archiveWorldQuaternary(plain[0] || 'federated-cli', { oligoBytes: Number(plain[1] || 512), groupSize: Number(plain[2] || 8) }));
   if (cmd === 'quaternary-recover') { const result = await kernel.quaternary.recover(plain[0] || null); delete result.buffer; return out(result); }
