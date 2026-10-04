@@ -230,11 +230,12 @@ class RecoveryNavigator {
       this.k.authorityFirewall ? this.k.authorityFirewall.verifyReferences(plan.firewall || [], { readOnly }).catch(error => ({ valid: false, error: error.message })) : Promise.resolve({ valid: true }),
       this.k.authorityFirewall ? this.k.authorityFirewall.verifyLedger({ readOnly }).catch(error => ({ valid: false, error: error.message })) : Promise.resolve({ valid: true })
     ]);
+    const historicalValidation = this.k.recoveryContracts.validateRegistry(historicalContracts);
     const historicalRegistryAvailable = Boolean(historicalContracts?.registryHash && historicalContracts.registryHash === plan.contractRegistryHash);
-    const historicalRegistrySafe = Boolean(historicalRegistryAvailable && Object.values(historicalContracts?.contracts || {}).every(c => c?.mayPromoteCanonical !== true));
+    const historicalRegistrySafe = Boolean(historicalRegistryAvailable && historicalValidation.valid);
     const currentRegistryMatches = Boolean(currentContracts?.registryHash && currentContracts.registryHash === plan.contractRegistryHash);
     return {
-      format: 'JSONDB-RECOVERY-NAVIGATOR-VERIFY-5',
+      format: 'JSONDB-RECOVERY-NAVIGATOR-VERIFY-6',
       valid: computed === plan.planHash && authoritySafe && terminalPromotionDenied && historicalRegistrySafe && firewallReferences.valid === true,
       readOnly,
       id: plan.id,
@@ -246,6 +247,7 @@ class RecoveryNavigator {
       terminalPromotionDenied,
       historicalRegistryAvailable,
       historicalRegistrySafe,
+      historicalRegistryViolations: historicalValidation.violations || [],
       currentRegistryMatches,
       policyDriftedSincePlan: historicalRegistryAvailable && !currentRegistryMatches,
       firewallReferencesValid: firewallReferences.valid,
@@ -254,7 +256,7 @@ class RecoveryNavigator {
       liveFirewallStatus: liveFirewall.status || 'PRESENT',
       futureTailIncident: firewallReferences.valid === true && liveFirewall.status !== 'ABSENT' && liveFirewall.valid === false,
       blockers: plan.blockers || [],
-      doctrine: 'Historical plan verification may run read-only against archived contracts and only the Firewall references the plan actually cites.'
+      doctrine: 'Historical plan verification may run read-only against a freshly revalidated archived constitution and only the Firewall references the plan actually cites.'
     };
   }
 }
