@@ -29,7 +29,7 @@ class PolicyCheckpoint {
     if (!contracts.valid) throw new Error('Policy Checkpoint refuses to attest invalid Recovery Contracts.');
 
     const core = {
-      format: 'JSONDB-POLICY-CHECKPOINT-2',
+      format: 'JSONDB-POLICY-CHECKPOINT-3',
       id: `${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
       label,
       at: now(),
@@ -39,7 +39,7 @@ class PolicyCheckpoint {
       navigator: navigator ? { id: navigator.id, planHash: navigator.planHash, status: navigator.status, goal: navigator.goal || null } : null,
       lastSavior: lastSavior ? { id: lastSavior.id, archiveHash: lastSavior.archiveHash } : null,
       timeWeave: weave ? { epochId: weave.epochId, weaveHash: weave.weaveHash, position: weave.position } : null,
-      doctrine: 'This checkpoint binds an exact Authority Firewall ledger prefix to independent signature families and the forward-evolving witness chain. It grants no new authority.'
+      doctrine: 'This checkpoint binds an exact Authority Firewall ledger prefix and the historical Recovery Contract registry to independent signature families and the forward-evolving witness chain.'
     };
     const coreHash = digest(core);
     const [cryptoAttestation, forwardAttestation] = await Promise.all([
@@ -67,15 +67,19 @@ class PolicyCheckpoint {
     const coreCopy = { ...record };
     delete coreCopy.coreHash; delete coreCopy.cryptoCouncil; delete coreCopy.forwardWitness; delete coreCopy.checkpointHash;
     const computedCoreHash = digest(coreCopy);
-    const [crypto, forward, firewall, ledger] = await Promise.all([
+    const [crypto, forward, firewall, ledger, historicalContracts, currentContracts] = await Promise.all([
       this.k.cryptoCouncil.verify(record.cryptoCouncil?.id).catch(error => ({ valid: false, error: error.message })),
       this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
       this.k.authorityFirewall.verifyLedger().catch(error => ({ valid: false, error: error.message })),
-      readJsonl(this.k.authorityFirewall.ledger).catch(() => [])
+      readJsonl(this.k.authorityFirewall.ledger).catch(() => []),
+      this.k.recoveryContracts.version(record.contracts?.registryHash || null).catch(() => null),
+      this.k.recoveryContracts.init().catch(() => null)
     ]);
     const forwardRecord = forward.results?.find(x => x.sequence === record.forwardWitness?.sequence) || null;
     const forwardValid = Boolean(forward.valid && forwardRecord?.valid && forwardRecord.subjectHash === record.coreHash && forwardRecord.attestationHash === record.forwardWitness.attestationHash);
     const cryptoValid = Boolean(crypto.valid && crypto.worldRoot === record.coreHash && Number(crypto.familyQuorum || 0) >= 2);
+    const historicalRegistryAvailable = Boolean(historicalContracts?.registryHash && historicalContracts.registryHash === record.contracts?.registryHash);
+    const currentRegistryMatches = Boolean(currentContracts?.registryHash && currentContracts.registryHash === record.contracts?.registryHash);
     const checkpointCount = Number(record.firewall?.decisions || 0);
     const prefixRow = checkpointCount > 0 ? ledger[checkpointCount - 1] : null;
     const prefixHeadMatches = checkpointCount === 0
@@ -83,13 +87,16 @@ class PolicyCheckpoint {
       : Boolean(prefixRow && !prefixRow.__corrupt && prefixRow.sequence === checkpointCount && prefixRow.decisionHash === record.firewall?.headHash);
     const liveLedgerDescends = Boolean(firewall.valid && ledger.length >= checkpointCount && prefixHeadMatches);
     return {
-      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-2',
+      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-3',
       id: record.id,
-      valid: computedCheckpointHash === record.checkpointHash && computedCoreHash === record.coreHash && cryptoValid && forwardValid && liveLedgerDescends,
+      valid: computedCheckpointHash === record.checkpointHash && computedCoreHash === record.coreHash && cryptoValid && forwardValid && historicalRegistryAvailable && liveLedgerDescends,
       staticValid: computedCheckpointHash === record.checkpointHash,
       coreValid: computedCoreHash === record.coreHash,
       cryptoCouncilValid: cryptoValid,
       forwardWitnessValid: forwardValid,
+      historicalRegistryAvailable,
+      currentRegistryMatches,
+      policyDriftedSinceCheckpoint: historicalRegistryAvailable && !currentRegistryMatches,
       liveFirewallLedgerValid: firewall.valid,
       checkpointDecisionCount: checkpointCount,
       liveDecisionCount: ledger.length,
@@ -97,7 +104,7 @@ class PolicyCheckpoint {
       liveLedgerDescends,
       checkpointFirewallHead: record.firewall?.headHash || null,
       liveFirewallHead: firewall.headHash || null,
-      doctrine: 'A later ledger is accepted only when the exact decision at the checkpoint sequence still has the checkpointed head hash.'
+      doctrine: 'Historical validity resolves the checkpointed constitution by registry hash. Current policy drift is reported separately and does not retroactively invalidate the checkpoint.'
     };
   }
 }
