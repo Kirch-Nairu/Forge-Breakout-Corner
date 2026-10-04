@@ -214,7 +214,7 @@ jobs:
           });
           NODE
 
-      - name: Inject corruption and prove forensic verification does not repair it
+      - name: Inject corruption and prove forensic verification semantics
         shell: bash
         run: |
           set -euo pipefail
@@ -292,12 +292,63 @@ jobs:
             }
           }
 
+          async function testFirewallHistoricalPrefixTamper(kernel) {
+            const ledger = kernel.authorityFirewall.ledger;
+            const original = await fsp.readFile(ledger);
+            const text = original.toString('utf8');
+            const lines = text.split('\n');
+            const first = lines.findIndex(line => line.trim());
+            if (first < 0) throw new Error('Authority Firewall ledger has no decision to tamper.');
+            const row = JSON.parse(lines[first]);
+            row.action = 'CI_TAMPERED_HISTORICAL_ACTION';
+            lines[first] = JSON.stringify(row);
+            const tampered = Buffer.from(lines.join('\n'));
+            try {
+              await fsp.writeFile(ledger, tampered);
+              const checkpoint = await kernel.policyCheckpoint.verify(null, { readOnly: true });
+              const live = await kernel.authorityFirewall.verifyLedger({ readOnly: true });
+              const after = await fsp.readFile(ledger);
+              return {
+                valid: Boolean(checkpoint.valid === false && checkpoint.historicalPrefixValid === false && live.valid === false && after.equals(tampered)),
+                historicalCheckpointRejected: checkpoint.valid === false,
+                historicalPrefixRejected: checkpoint.historicalPrefixValid === false,
+                liveFirewallRejected: live.valid === false,
+                corruptedPrefixLeftUntouched: after.equals(tampered)
+              };
+            } finally {
+              await fsp.writeFile(ledger, original);
+            }
+          }
+
+          async function testLastSaviorReceiptTamper(kernel) {
+            const latestFile = path.join(kernel.lastSavior.root, 'latest.json');
+            const original = await fsp.readFile(latestFile);
+            const receipt = JSON.parse(original.toString('utf8'));
+            receipt.label = `${receipt.label || 'last-savior'}:ci-tampered`;
+            const tampered = Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`);
+            try {
+              await fsp.writeFile(latestFile, tampered);
+              const verification = await kernel.lastSavior.verify(null, { live: false, readOnly: true });
+              const after = await fsp.readFile(latestFile);
+              return {
+                valid: Boolean(verification.valid === false && verification.staticValid === false && after.equals(tampered)),
+                archiveRejected: verification.valid === false,
+                staticHashRejected: verification.staticValid === false,
+                tamperedReceiptLeftUntouched: after.equals(tampered)
+              };
+            } finally {
+              await fsp.writeFile(latestFile, original);
+            }
+          }
+
           async function main() {
             const kernel = new FederatedOmegaKernel(path.join(process.cwd(), 'jsondb-lab'));
             const results = {
               historicalContractFallback: await testHistoricalContractFallback(kernel),
               memoryPalaceNoRepair: await testMemoryPalaceNoRepair(kernel),
-              firewallFutureTail: await testFirewallFutureTail(kernel)
+              firewallFutureTail: await testFirewallFutureTail(kernel),
+              firewallHistoricalPrefixTamper: await testFirewallHistoricalPrefixTamper(kernel),
+              lastSaviorReceiptTamper: await testLastSaviorReceiptTamper(kernel)
             };
             process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
             const failed = Object.entries(results).filter(([, result]) => result.valid !== true).map(([name]) => name);
