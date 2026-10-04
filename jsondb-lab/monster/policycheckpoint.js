@@ -76,8 +76,8 @@ class PolicyCheckpoint {
     const checkpointCount = Number(record.firewall?.decisions || 0);
     const readOnly = options.readOnly === true;
     const [crypto, forward, prefix, liveFirewall, historicalContracts, currentContracts] = await Promise.all([
-      this.k.cryptoCouncil.verify(record.cryptoCouncil?.id).catch(error => ({ valid: false, error: error.message })),
-      this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
+      this.k.cryptoCouncil.verify(record.cryptoCouncil?.id, { readOnly }).catch(error => ({ valid: false, error: error.message })),
+      this.k.forwardWitness.verifyAll({ readOnly }).catch(error => ({ valid: false, error: error.message })),
       this.k.authorityFirewall.verifyPrefix(checkpointCount, { readOnly }).catch(error => ({ valid: false, error: error.message })),
       this.k.authorityFirewall.verifyLedger({ readOnly }).catch(error => ({ valid: false, error: error.message })),
       this.k.recoveryContracts.version(record.contracts?.registryHash || null, { hydrate: !readOnly }).catch(() => null),
@@ -94,7 +94,7 @@ class PolicyCheckpoint {
     const historicalPrefixValid = Boolean(prefix.valid && prefixHeadMatches);
 
     return {
-      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-6',
+      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-7',
       id: record.id,
       valid: computedCheckpointHash === record.checkpointHash && computedCoreHash === record.coreHash && cryptoValid && forwardValid && historicalRegistrySafe && historicalPrefixValid,
       readOnly,
@@ -118,7 +118,7 @@ class PolicyCheckpoint {
       futureTailIncident: historicalPrefixValid && liveFirewall.status !== 'ABSENT' && liveFirewall.valid === false,
       checkpointFirewallHead: record.firewall?.headHash || null,
       liveFirewallHead: liveFirewall.headHash || null,
-      doctrine: 'Historical validity is based on the exact checkpointed Firewall prefix and a freshly revalidated historical constitution. Later-tail corruption is surfaced separately as a current incident. Read-only verification does not hydrate policy indexes.'
+      doctrine: 'Historical validity is based on the exact checkpointed Firewall prefix, freshly revalidated historical constitution, and read-only cryptographic evidence. Later-tail corruption is surfaced separately as a current incident.'
     };
   }
 }
