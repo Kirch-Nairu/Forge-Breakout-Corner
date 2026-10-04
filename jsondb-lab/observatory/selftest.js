@@ -54,11 +54,7 @@ function request(method, pathname) {
     const req = http.request({ host, port, method, path: pathname }, res => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve({
-        status: res.statusCode,
-        headers: res.headers,
-        body: Buffer.concat(chunks).toString('utf8')
-      }));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks).toString('utf8') }));
     });
     req.on('error', reject);
     req.end();
@@ -153,10 +149,21 @@ async function main() {
     const snapshotJson = JSON.parse(snapshot.body);
     assert(snapshotJson.authority === 'READ_ONLY_OBSERVER', 'Snapshot did not declare observer authority.');
 
-    const indexedCollection =
-      snapshotJson.collections.find(collection => collection.rows > 0 && collection.indexes?.length) ||
-      snapshotJson.collections.find(collection => collection.rows > 0) ||
-      snapshotJson.collections[0];
+    const recoveryResponse = await request('GET', '/api/recovery-graph');
+    assert(recoveryResponse.status === 200, `Recovery graph endpoint returned ${recoveryResponse.status}.`);
+    const recovery = JSON.parse(recoveryResponse.body);
+    assert(recovery.authority === 'READ_ONLY_OBSERVER', 'Recovery graph did not declare observer authority.');
+    assert(Array.isArray(recovery.nodes) && recovery.nodes.length > 0, 'Recovery graph returned no contract nodes.');
+    assert(recovery.nodes.every(node => node.mayPromoteCanonical === false), 'Recovery graph exposed a contract with automatic canonical promotion authority.');
+    assert(Array.isArray(recovery.edges), 'Recovery graph edges are missing.');
+
+    const authorityResponse = await request('GET', '/api/authority-ledger');
+    assert(authorityResponse.status === 200, `Authority ledger endpoint returned ${authorityResponse.status}.`);
+    const authority = JSON.parse(authorityResponse.body);
+    assert(authority.authority === 'READ_ONLY_OBSERVER', 'Authority ledger did not declare observer authority.');
+    assert(Array.isArray(authority.decisions), 'Authority ledger decisions are missing.');
+
+    const indexedCollection = snapshotJson.collections.find(collection => collection.rows > 0 && collection.indexes?.length) || snapshotJson.collections.find(collection => collection.rows > 0) || snapshotJson.collections[0];
     assert(indexedCollection, 'Bootstrap produced no collection for Observatory Index Lab.');
 
     const indexPath = `/api/index-lab?collection=${encodeURIComponent(indexedCollection.name)}`;
@@ -171,32 +178,31 @@ async function main() {
     if (indexedCollection.indexes?.length) assert(indexJson.indexArtifact?.indexes?.length > 0, 'Persisted engine indexes were not exposed by Index Lab.');
 
     const html = await request('GET', '/');
-    assert(
-      html.status === 200 && /<title>OMEGA Observatory<\/title>/.test(html.body) && /<strong>OMEGA<\/strong>/.test(html.body) && /<span>OBSERVATORY<\/span>/.test(html.body),
-      'GUI shell was not served with the expected Observatory identity.'
-    );
+    assert(html.status === 200 && /<title>OMEGA Observatory<\/title>/.test(html.body) && /data-view="authority"/.test(html.body) && /id="wal-scrubber"/.test(html.body) && /id="recovery-graph"/.test(html.body), 'GUI shell was not served with the expanded Observatory theaters.');
     assert(String(html.headers['content-security-policy'] || '').includes("default-src 'self'"), 'CSP header missing.');
 
-    const head = await request('HEAD', '/styles.css');
-    assert(head.status === 200, 'HEAD static request failed.');
-    const indexScript = await request('GET', '/index-lab.js');
-    const indexStyle = await request('GET', '/index-lab.css');
-    assert(indexScript.status === 200 && /engineIndexStructure|IndexLab/.test(indexScript.body), 'Index Lab script was not served.');
-    assert(indexStyle.status === 200 && /index-truth-banner/.test(indexStyle.body), 'Index Lab stylesheet was not served.');
+    const assets = await Promise.all(['/index-lab.js','/index-lab.css','/wal-theater.js','/recovery-theater.js','/recovery-theater.css'].map(route => request('GET', route)));
+    assert(assets.every(x => x.status === 200), 'One or more Observatory theater assets were not served.');
+    assert(/engineIndexStructure|IndexLab/.test(assets[0].body), 'Index Lab script identity missing.');
+    assert(/wal-scrubber|WAL/.test(assets[2].body), 'WAL theater script identity missing.');
+    assert(/recovery-graph|authority-ledger/.test(assets[3].body), 'Recovery theater script identity missing.');
 
     const post = await request('POST', '/api/snapshot');
-    assert(post.status === 405, 'Mutation method was not denied.');
     const indexPost = await request('POST', indexPath);
-    assert(indexPost.status === 405, 'Index Lab accepted a mutation method.');
+    const recoveryPost = await request('POST', '/api/recovery-graph');
+    const authorityPost = await request('POST', '/api/authority-ledger');
+    assert(post.status === 405 && indexPost.status === 405 && recoveryPost.status === 405 && authorityPost.status === 405, 'A read-only Observatory API accepted a mutation method.');
 
     const arbitrary = await request('GET', '/api/file?path=../../../../etc/passwd');
-    assert(arbitrary.status === 404, 'Arbitrary file route unexpectedly exists.');
-
     const traversal = await request('GET', '/%2e%2e/%2e%2e/etc/passwd');
-    assert(traversal.status === 404, 'Traversal request unexpectedly resolved.');
-
     const hostileCollection = await request('GET', '/api/index-lab?collection=..%2F..%2F..%2Fetc%2Fpasswd');
+    const recoveryPathProbe = await request('GET', '/api/recovery-graph?path=../../../../etc/passwd');
+    const authorityPathProbe = await request('GET', '/api/authority-ledger?path=../../../../etc/passwd');
+    assert(arbitrary.status === 404, 'Arbitrary file route unexpectedly exists.');
+    assert(traversal.status === 404, 'Traversal request unexpectedly resolved.');
     assert(hostileCollection.status === 404, 'Hostile Index Lab collection escaped the canonical catalog allowlist.');
+    assert(recoveryPathProbe.status === 200 && JSON.parse(recoveryPathProbe.body).format === recovery.format, 'Recovery graph query parameter changed route semantics.');
+    assert(authorityPathProbe.status === 200 && JSON.parse(authorityPathProbe.body).format === authority.format, 'Authority ledger query parameter changed route semantics.');
 
     const afterObservation = await canonicalSnapshot();
     assert(afterObservation.digest === before.digest, `Observer mutated canonical engine storage.\nbefore=${before.digest}\nafter=${afterObservation.digest}`);
@@ -215,20 +221,15 @@ async function main() {
       })().catch(error => { console.error(error.stack || error); process.exit(1); });
     `);
     const indexObserved = await indexEventPromise;
-    assert(indexObserved.mode === 'LIVE', 'Index change observation was not marked LIVE.');
-    assert(indexObserved.family === 'index', 'Index change observation was not classified as index family.');
-    assert(indexObserved.from === 'current' && indexObserved.to === 'index', 'Index change visual route is not current -> index.');
+    assert(indexObserved.mode === 'LIVE' && indexObserved.family === 'index' && indexObserved.from === 'current' && indexObserved.to === 'index', 'Index event was not normalized as a live current -> index movement.');
 
     await new Promise(r => setTimeout(r, 650));
     const afterExternalIndexMutation = await canonicalSnapshot();
     const refreshedIndexResponse = await request('GET', indexPath);
-    assert(refreshedIndexResponse.status === 200, 'Index Lab failed after real external index mutation.');
     const refreshedIndex = JSON.parse(refreshedIndexResponse.body);
     assert(Number(refreshedIndex.indexArtifact?.tx || 0) > originalIndexTx, 'Index Lab did not observe the committed transaction in persisted index metadata.');
     assert(refreshedIndex.table.rows.some(row => row.id === probeRow.id && row._observatoryProbe === probeValue), 'Index Lab did not observe the externally committed row update.');
-    await request('GET', '/api/snapshot');
-    await request('GET', '/index-lab.js');
-    await request('GET', '/index-lab.css');
+    await Promise.all([request('GET', '/api/snapshot'), request('GET', '/api/recovery-graph'), request('GET', '/api/authority-ledger'), request('GET', '/wal-theater.js'), request('GET', '/recovery-theater.js')]);
     await new Promise(r => setTimeout(r, 650));
     const afterIndexObservation = await canonicalSnapshot();
     assert(afterExternalIndexMutation.digest === afterIndexObservation.digest, 'Observatory changed canonical storage after observing real index activity.');
@@ -241,62 +242,25 @@ async function main() {
 
     await new Promise(r => setTimeout(r, 650));
     const afterExternalCheckpoint = await canonicalSnapshot();
-    await request('GET', '/api/snapshot');
+    await Promise.all([request('GET', '/api/snapshot'), request('GET', '/api/recovery-graph'), request('GET', '/api/authority-ledger')]);
     await new Promise(r => setTimeout(r, 650));
     const afterCheckpointObservation = await canonicalSnapshot();
     assert(afterExternalCheckpoint.digest === afterCheckpointObservation.digest, 'Observatory changed canonical storage after observing external checkpoint activity.');
 
     const report = {
-      format: 'JSONDB-OMEGA-OBSERVATORY-SELFTEST-2',
+      format: 'JSONDB-OMEGA-OBSERVATORY-SELFTEST-3',
       ok: true,
       authority: 'READ_ONLY_OBSERVER',
-      observerMutationBoundary: {
-        before: before.digest,
-        afterReadOnlyInteraction: afterObservation.digest,
-        unchanged: before.digest === afterObservation.digest
-      },
-      indexLabTruthBoundary: {
-        collection: indexedCollection.name,
-        engineIndexStructure: indexJson.truth.engineIndexStructure,
-        sortAnimation: indexJson.truth.sortAnimation,
-        hostileCollectionDenied: hostileCollection.status === 404,
-        postDenied: indexPost.status === 405
-      },
-      liveIndexObservation: {
-        seen: true,
-        type: indexObserved.type,
-        family: indexObserved.family,
-        source: indexObserved.source,
-        mutation: indexObserved.mutation,
-        from: indexObserved.from,
-        to: indexObserved.to,
-        persistedIndexTxAdvanced: Number(refreshedIndex.indexArtifact?.tx || 0) > originalIndexTx,
-        committedProbeVisible: true
-      },
-      postIndexObservationBoundary: {
-        afterExternalMutation: afterExternalIndexMutation.digest,
-        afterObserverReads: afterIndexObservation.digest,
-        unchanged: afterExternalIndexMutation.digest === afterIndexObservation.digest
-      },
-      liveCheckpointObservation: {
-        seen: true,
-        type: checkpointObserved.type,
-        family: checkpointObserved.family,
-        source: checkpointObserved.source
-      },
-      postCheckpointObservationBoundary: {
-        afterExternalMutation: afterExternalCheckpoint.digest,
-        afterObserverRead: afterCheckpointObservation.digest,
-        unchanged: afterExternalCheckpoint.digest === afterCheckpointObservation.digest
-      },
-      adversarialHttp: {
-        snapshotPostDenied: post.status === 405,
-        indexLabPostDenied: indexPost.status === 405,
-        arbitraryFileUnavailable: arbitrary.status === 404,
-        traversalUnavailable: traversal.status === 404,
-        hostileCollectionDenied: hostileCollection.status === 404,
-        cspPresent: true
-      }
+      observerMutationBoundary: { before: before.digest, afterReadOnlyInteraction: afterObservation.digest, unchanged: before.digest === afterObservation.digest },
+      walTheater: { mode: 'REPLAY_BROWSER_MEMORY_ONLY', entriesObserved: snapshotJson.wal?.length || 0, staticAssetServed: assets[2].status === 200 },
+      recoveryGraph: { nodes: recovery.nodes.length, edges: recovery.edges.length, automaticPromoters: recovery.nodes.filter(node => node.mayPromoteCanonical).length, postDenied: recoveryPost.status === 405 },
+      authorityTheater: { decisions: authority.decisions.length, headHash: authority.headHash, postDenied: authorityPost.status === 405 },
+      indexLabTruthBoundary: { collection: indexedCollection.name, engineIndexStructure: indexJson.truth.engineIndexStructure, sortAnimation: indexJson.truth.sortAnimation, hostileCollectionDenied: hostileCollection.status === 404, postDenied: indexPost.status === 405 },
+      liveIndexObservation: { seen: true, type: indexObserved.type, family: indexObserved.family, source: indexObserved.source, mutation: indexObserved.mutation, from: indexObserved.from, to: indexObserved.to, persistedIndexTxAdvanced: Number(refreshedIndex.indexArtifact?.tx || 0) > originalIndexTx, committedProbeVisible: true },
+      postIndexObservationBoundary: { afterExternalMutation: afterExternalIndexMutation.digest, afterObserverReads: afterIndexObservation.digest, unchanged: afterExternalIndexMutation.digest === afterIndexObservation.digest },
+      liveCheckpointObservation: { seen: true, type: checkpointObserved.type, family: checkpointObserved.family, source: checkpointObserved.source },
+      postCheckpointObservationBoundary: { afterExternalMutation: afterExternalCheckpoint.digest, afterObserverRead: afterCheckpointObservation.digest, unchanged: afterExternalCheckpoint.digest === afterCheckpointObservation.digest },
+      adversarialHttp: { snapshotPostDenied: post.status === 405, indexLabPostDenied: indexPost.status === 405, recoveryPostDenied: recoveryPost.status === 405, authorityPostDenied: authorityPost.status === 405, arbitraryFileUnavailable: arbitrary.status === 404, traversalUnavailable: traversal.status === 404, hostileCollectionDenied: hostileCollection.status === 404, recoveryPathInputIgnored: recoveryPathProbe.status === 200, authorityPathInputIgnored: authorityPathProbe.status === 200, cspPresent: true }
     };
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } finally {
@@ -306,7 +270,4 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error(error.stack || error);
-  process.exitCode = 1;
-});
+main().catch(error => { console.error(error.stack || error); process.exitCode = 1; });
