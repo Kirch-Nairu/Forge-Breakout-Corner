@@ -57,15 +57,17 @@ class HashPolyglot {
     };
   }
 
-  async verify(value, envelope) {
-    const policy = await this.init();
+  async verify(value, envelope, options = {}) {
+    const readOnly = options.readOnly === true;
+    const policy = readOnly ? await readJson(this.policyFile, null) : await this.init();
     const buffer = bytesOf(value);
+    const runtimeAlgorithms = new Set(crypto.getHashes().map(x=>x.toLowerCase()));
     const results = [];
     let valid = 0;
     let checked = 0;
     for (const [algorithm, expected] of Object.entries(envelope?.digests || {})) {
       if (!expected) { results.push({ algorithm, available: false, valid: null, reason: 'digest absent from envelope' }); continue; }
-      if (!crypto.getHashes().map(x=>x.toLowerCase()).includes(algorithm.toLowerCase())) {
+      if (!runtimeAlgorithms.has(algorithm.toLowerCase())) {
         results.push({ algorithm, available: false, valid: null, reason: 'algorithm unavailable in runtime' });
         continue;
       }
@@ -74,14 +76,24 @@ class HashPolyglot {
       checked++; if (ok) valid++;
       results.push({ algorithm, available: true, valid: ok, expected, actual });
     }
-    const required = Math.min(Number(envelope?.minimumIndependentDigests || policy.minimumIndependentDigests || 1), checked || 1);
+    const envelopeRequired = Number(envelope?.minimumIndependentDigests || 0);
+    const policyRequired = Number(policy?.minimumIndependentDigests || 0);
+    const required = Math.max(1, envelopeRequired || policyRequired || 1);
     const contradictions = results.filter(x => x.available && x.valid === false);
+    const quorumAvailable = checked >= required;
+    const quorumSatisfied = valid >= required;
+    const policyGenerationMatches = policy ? Number(policy.generation || 0) === Number(envelope?.policyGeneration || 0) : null;
     return {
-      format: 'JSONDB-HASH-POLYGLOT-VERIFY-1', at: now(),
-      valid: checked >= required && valid >= required && contradictions.length === 0,
-      checked, validDigests: valid, required, contradictions: contradictions.length,
+      format: 'JSONDB-HASH-POLYGLOT-VERIFY-2', at: now(),
+      valid: quorumAvailable && quorumSatisfied && contradictions.length === 0,
+      readOnly,
+      policyPresent: Boolean(policy),
+      policyGenerationMatches,
+      envelopePolicyGeneration: envelope?.policyGeneration ?? null,
+      currentPolicyGeneration: policy?.generation ?? null,
+      checked, validDigests: valid, required, quorumAvailable, quorumSatisfied, contradictions: contradictions.length,
       bytes: buffer.length, results,
-      interpretation: contradictions.length ? 'BYTE_IDENTITY_CONTRADICTION' : checked < required ? 'INSUFFICIENT_HASH_DIVERSITY' : valid >= required ? 'DIVERSE_HASH_AGREEMENT' : 'UNTRUSTED'
+      interpretation: contradictions.length ? 'BYTE_IDENTITY_CONTRADICTION' : !quorumAvailable ? 'INSUFFICIENT_RUNTIME_HASH_DIVERSITY' : quorumSatisfied ? 'DIVERSE_HASH_AGREEMENT' : 'UNTRUSTED'
     };
   }
 
