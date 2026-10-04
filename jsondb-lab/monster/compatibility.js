@@ -72,17 +72,19 @@ class CompatibilityTimeCapsule {
     return { id, label, formats: selected, sources: sources.map(x => ({ path: x.path, sha256: x.sha256, language: x.language })), sourceMerkleRoot: capsule.sourceMerkleRoot };
   }
 
-  async verify(id = null) {
-    await this.init();
+  async verify(id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const latest = id ? { id } : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!latest) return { valid: false, status: 'ABSENT' };
+    if (!latest) return { valid: false, status: 'ABSENT', readOnly };
     const capsule = await readJson(path.join(this.generations, `${latest.id}.json`), null);
-    if (!capsule) return { valid: false, status: 'MISSING_CAPSULE', id: latest.id };
+    if (!capsule) return { valid: false, status: 'MISSING_CAPSULE', readOnly, id: latest.id };
     const results = (capsule.sources || []).map(src => ({ path: src.path, expected: src.sha256, actual: sha(src.source), valid: sha(src.source) === src.sha256 }));
     const root = merkleRoot((capsule.sources || []).map(src => sha(src.source)));
     return {
-      format: 'JSONDB-COMPATIBILITY-VERIFY-1', id: capsule.id,
+      format: 'JSONDB-COMPATIBILITY-VERIFY-2', id: capsule.id,
       valid: results.every(x=>x.valid) && root === capsule.sourceMerkleRoot,
+      readOnly,
       expectedRoot: capsule.sourceMerkleRoot, computedRoot: root,
       runtime: capsule.runtime, formats: capsule.formats, results
     };
