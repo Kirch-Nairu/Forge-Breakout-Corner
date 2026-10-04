@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KIRION Data Workbench</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <div class="brand-mark">K</div>
+        <div>
+          <strong>KIRION</strong>
+          <span>DATA WORKBENCH</span>
+        </div>
+      </div>
+
+      <div class="authority-card">
+        <span class="eyebrow">AUTHORITY</span>
+        <strong>EXPLICIT WRITE APP</strong>
+        <p>Writes go through MonsterEngine transactions. Observatory stays read-only.</p>
+      </div>
+
+      <nav class="nav" aria-label="Workbench sections">
+        <button class="nav-btn active" data-view="seed"><span>01</span> Seeder</button>
+        <button class="nav-btn" data-view="data"><span>02</span> Data</button>
+        <button class="nav-btn" data-view="query"><span>03</span> Query Lab</button>
+        <button class="nav-btn" data-view="benchmark"><span>04</span> Benchmark</button>
+      </nav>
+
+      <a class="observatory-link" href="http://127.0.0.1:7331" target="_blank" rel="noopener">
+        Open OMEGA Observatory ↗
+      </a>
+
+      <div class="rail-status">
+        <div><span class="dot" id="connectionDot"></span><span id="connectionLabel">connecting</span></div>
+        <div>TX <strong id="railTx">—</strong></div>
+        <div>LSN <strong id="railLsn">—</strong></div>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <span class="eyebrow">JSONDB MONSTER / WRITE SURFACE</span>
+          <h1 id="viewTitle">KIRION Engineering Seeder</h1>
+        </div>
+        <div class="top-chips">
+          <span class="chip chip-write">WRITE ENABLED</span>
+          <span class="chip" id="busyChip">IDLE</span>
+          <span class="chip" id="rowsChip">0 ROWS</span>
+        </div>
+      </header>
+
+      <section class="flow-stage" aria-label="Live database flow">
+        <div class="flow-head">
+          <div>
+            <span class="eyebrow">LIVE ENGINE FLOW</span>
+            <strong>Watch the write become database state</strong>
+          </div>
+          <div class="flow-legend">
+            <span><i class="legend-dot app"></i> app</span>
+            <span><i class="legend-dot engine"></i> engine</span>
+            <span><i class="legend-dot durable"></i> durable</span>
+          </div>
+        </div>
+        <div class="pipeline" id="pipeline">
+          <div class="pipe-node" data-phase="request"><span>01</span><strong>APP REQUEST</strong><small>seed / insert / query</small></div>
+          <div class="pipe-link"></div>
+          <div class="pipe-node" data-phase="validate"><span>02</span><strong>VALIDATE</strong><small>authority + constraints</small></div>
+          <div class="pipe-link"></div>
+          <div class="pipe-node" data-phase="schema"><span>03</span><strong>SCHEMA</strong><small>collections + indexes</small></div>
+          <div class="pipe-link"></div>
+          <div class="pipe-node" data-phase="transaction"><span>04</span><strong>TRANSACTION</strong><small>bounded mutation batch</small></div>
+          <div class="pipe-link"></div>
+          <div class="pipe-node" data-phase="commit"><span>05</span><strong>COMMIT</strong><small>WAL / current / indexes</small></div>
+          <div class="pipe-link"></div>
+          <div class="pipe-node" data-phase="benchmark"><span>06</span><strong>MEASURE</strong><small>planner + advanced indexes</small></div>
+          <div class="packet-layer" id="packetLayer" aria-hidden="true"></div>
+        </div>
+        <div class="flow-readout">
+          <div><span>LAST EVENT</span><strong id="lastEventType">WAITING</strong></div>
+          <div><span>DOMAIN</span><strong id="lastEventDomain">—</strong></div>
+          <div><span>SEQUENCE</span><strong id="lastEventSeq">0</strong></div>
+          <div><span>ACTIVE</span><strong id="lastEventPhase">OBSERVE</strong></div>
+        </div>
+      </section>
+
+      <section class="view active" data-view-panel="seed">
+        <div class="view-grid seed-grid">
+          <article class="panel seed-config">
+            <div class="panel-head">
+              <div><span class="eyebrow">SEEDER</span><h2>Generate a KIRION engineering world</h2></div>
+              <span class="panel-badge">REAL TRANSACTIONS</span>
+            </div>
+
+            <label class="field-label">Scale</label>
+            <div class="scale-grid" id="scaleGrid"></div>
+
+            <div class="form-grid">
+              <label>
+                <span>Deterministic seed</span>
+                <input id="seedText" value="KIRION-OMEGA" autocomplete="off">
+              </label>
+              <label>
+                <span>Benchmark rows override</span>
+                <input id="benchmarkRows" type="number" min="0" max="100000" placeholder="use preset">
+              </label>
+              <label>
+                <span>Transaction batch size</span>
+                <input id="batchSize" type="number" min="25" max="1000" value="500">
+              </label>
+            </div>
+
+            <button class="primary-action" id="seedButton">
+              <span>SEED THE MONSTER</span>
+              <small>FORGE + EARTH + JUPITER + MARS + BENCHMARK</small>
+            </button>
+            <div class="progress-shell"><div class="progress-bar" id="seedProgress"></div></div>
+            <p class="muted" id="seedStatus">Choose a scale. Every generated row goes through MonsterEngine.</p>
+          </article>
+
+          <article class="panel domain-panel">
+            <div class="panel-head">
+              <div><span class="eyebrow">DOMAIN MAP</span><h2>What the data represents</h2></div>
+            </div>
+            <div class="domain-grid" id="domainGrid"></div>
+            <div class="unresolved" id="unresolvedDomains"></div>
+          </article>
+
+          <article class="panel collection-plan wide">
+            <div class="panel-head">
+              <div><span class="eyebrow">SEED PLAN</span><h2>Rows that will hit the engine</h2></div>
+              <strong id="plannedRows">0 planned</strong>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Domain</th><th>Collection</th><th>Purpose</th><th>Rows</th><th>Current</th></tr></thead>
+                <tbody id="seedPlanBody"></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" data-view-panel="data">
+        <div class="view-grid data-grid">
+          <article class="panel">
+            <div class="panel-head"><div><span class="eyebrow">COLLECTIONS</span><h2>Live Workbench data</h2></div><button class="ghost" id="refreshData">Refresh</button></div>
+            <div class="collection-list" id="collectionList"></div>
+          </article>
+
+          <article class="panel data-preview">
+            <div class="panel-head"><div><span class="eyebrow">ROWS</span><h2 id="sampleTitle">Select a collection</h2></div><span class="panel-badge" id="sampleCount">—</span></div>
+            <pre class="json-view" id="sampleJson">[]</pre>
+          </article>
+
+          <article class="panel record-insert wide">
+            <div class="panel-head"><div><span class="eyebrow">MANUAL WRITE</span><h2>Insert one record through MonsterEngine</h2></div><span class="panel-badge warning">CONSTRAINTS APPLY</span></div>
+            <div class="insert-grid">
+              <label><span>Collection</span><select id="recordCollection"></select></label>
+              <label class="json-input"><span>JSON row</span><textarea id="recordJson" spellcheck="false">{
+  "benchKey": "manual-example-001",
+  "priority": 99,
+  "status": "active",
+  "domain": "forge",
+  "hotKey": "manual",
+  "ordinal": 1,
+  "numericValue": 42,
+  "traceId": "manual-trace",
+  "payload": "manual workbench insert"
+}</textarea></label>
+              <button class="primary-action compact" id="insertButton">COMMIT RECORD</button>
+            </div>
+            <pre class="result-view" id="insertResult">Waiting for an insert.</pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" data-view-panel="query">
+        <div class="view-grid query-grid">
+          <article class="panel query-editor">
+            <div class="panel-head"><div><span class="eyebrow">QUERY AST</span><h2>Ask the actual Monster planner</h2></div><span class="panel-badge">MAX 5000 ROWS</span></div>
+            <textarea id="queryJson" spellcheck="false">{
+  "from": "benchmark_records",
+  "where": { "field": "priority", "op": "eq", "value": 1 },
+  "select": ["id", "priority", "status", "domain", "hotKey"],
+  "limit": 100
+}</textarea>
+            <button class="primary-action compact" id="queryButton">EXECUTE QUERY</button>
+          </article>
+
+          <article class="panel planner-panel">
+            <div class="panel-head"><div><span class="eyebrow">PLANNER INTERPRETER</span><h2 id="planAccess">No plan yet</h2></div></div>
+            <div class="planner-metrics">
+              <div><span>ACCESS</span><strong id="planType">—</strong></div>
+              <div><span>INDEX</span><strong id="planIndex">—</strong></div>
+              <div><span>EXAMINED</span><strong id="planExamined">—</strong></div>
+              <div><span>DURATION</span><strong id="planDuration">—</strong></div>
+            </div>
+            <p id="planReason" class="explain-copy">Execute a query to see why JSONDB chose an index or full scan.</p>
+            <pre class="json-view short" id="queryResult">[]</pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" data-view-panel="benchmark">
+        <div class="view-grid benchmark-grid">
+          <article class="panel benchmark-control">
+            <div class="panel-head"><div><span class="eyebrow">BENCHMARK LAB</span><h2>Torture the JSON database</h2></div><span class="panel-badge danger">ADVANCED</span></div>
+            <label class="toggle-row"><input type="checkbox" id="advancedIndexes" checked><span>Build B+ tree-ish, BM25-ish and vector graph indexes</span></label>
+            <label class="toggle-row"><input type="checkbox" id="durabilityBench"><span>Include checkpoint benchmark</span></label>
+            <label class="toggle-row"><input type="checkbox" id="compactBench"><span>Include segment compaction</span></label>
+            <button class="primary-action" id="benchmarkButton"><span>RUN ADVANCED BENCHMARK</span><small>planner / join / aggregate / MVCC / B+ / FTS / vector</small></button>
+            <p class="muted">Vector graph build automatically skips huge MARS corpora because the educational implementation is O(n²).</p>
+          </article>
+
+          <article class="panel benchmark-summary">
+            <div class="panel-head"><div><span class="eyebrow">RESULT</span><h2 id="benchmarkHeadline">No benchmark yet</h2></div></div>
+            <div class="benchmark-metrics">
+              <div><span>CASES</span><strong id="benchCases">—</strong></div>
+              <div><span>PASS</span><strong id="benchPass">—</strong></div>
+              <div><span>FAIL</span><strong id="benchFail">—</strong></div>
+              <div><span>WALL SUM</span><strong id="benchTime">—</strong></div>
+            </div>
+            <div id="benchmarkCases" class="case-list"></div>
+          </article>
+
+          <article class="panel planner-table wide">
+            <div class="panel-head"><div><span class="eyebrow">ACCESS PLAN COMPARISON</span><h2>Index vs scan behavior</h2></div></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Case</th><th>Access</th><th>Index</th><th>Cost</th><th>Examined</th><th>Engine ms</th></tr></thead>
+                <tbody id="plannerTableBody"><tr><td colspan="6" class="muted">Run the benchmark first.</td></tr></tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <aside class="interpreter">
+      <div class="interpreter-head">
+        <div><span class="eyebrow">LIVE INTERPRETER</span><h2>What the fuck is it doing?</h2></div>
+        <div class="mode-switch" role="group" aria-label="Interpreter detail">
+          <button class="mode-btn active" data-mode="simple">Simple</button>
+          <button class="mode-btn" data-mode="engineer">Engineer</button>
+        </div>
+      </div>
+      <div class="current-explanation" id="currentExplanation">
+        <span>WAITING FOR ENGINE ACTIVITY</span>
+        <p>Seed data, insert a row, execute a query, or run the benchmark. This panel explains each real Workbench event.</p>
+      </div>
+      <div class="event-feed" id="eventFeed"></div>
+    </aside>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
