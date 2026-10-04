@@ -94,12 +94,12 @@ class ProofCarryingRecoveryPlan {
     return dossier;
   }
 
-  async verify(id = null) {
-    await this.init();
+  async verify(id = null, options = {}) {
+    if (options.readOnly !== true) await this.init();
     const dossier = id
       ? await readJson(path.join(this.records, `${id}.json`), null)
       : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!dossier) return { valid: false, status: 'ABSENT' };
+    if (!dossier) return { valid: false, status: 'ABSENT', readOnly: options.readOnly === true };
 
     const copy = { ...dossier };
     delete copy.dossierHash;
@@ -111,14 +111,15 @@ class ProofCarryingRecoveryPlan {
     delete coreCopy.forwardWitness;
     delete coreCopy.dossierHash;
     const coreValid = digest(coreCopy) === dossier.coreHash;
+    const readOnly = options.readOnly === true;
 
     const [plan, policy, crypto, forward, historicalRegistry, currentRegistry] = await Promise.all([
-      this.k.recoveryNavigator.verify(dossier.navigator?.id || null).catch(error => ({ valid: false, error: error.message })),
-      this.k.policyCheckpoint.verify(dossier.authority?.policyCheckpoint?.id || null).catch(error => ({ valid: false, error: error.message })),
+      this.k.recoveryNavigator.verify(dossier.navigator?.id || null, { readOnly }).catch(error => ({ valid: false, error: error.message })),
+      this.k.policyCheckpoint.verify(dossier.authority?.policyCheckpoint?.id || null, { readOnly }).catch(error => ({ valid: false, error: error.message })),
       this.k.cryptoCouncil.verify(dossier.cryptoCouncil?.id).catch(error => ({ valid: false, error: error.message })),
       this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
-      this.k.recoveryContracts.version(dossier.contracts?.registryHash || null).catch(() => null),
-      this.k.recoveryContracts.init().catch(() => null)
+      this.k.recoveryContracts.version(dossier.contracts?.registryHash || null, { hydrate: !readOnly }).catch(() => null),
+      readOnly ? this.k.recoveryContracts.inspect().catch(() => null) : this.k.recoveryContracts.init().catch(() => null)
     ]);
     const forwardRecord = forward.results?.find(x => x.sequence === dossier.forwardWitness?.sequence) || null;
     const forwardValid = Boolean(forward.valid && forwardRecord?.valid && forwardRecord.subjectHash === dossier.coreHash && forwardRecord.attestationHash === dossier.forwardWitness.attestationHash);
@@ -126,12 +127,14 @@ class ProofCarryingRecoveryPlan {
     const terminal = dossier.authority?.terminalPromotionDenial;
     const terminalDenied = Boolean(terminal && terminal.allowed === false);
     const historicalRegistryAvailable = Boolean(historicalRegistry?.registryHash && historicalRegistry.registryHash === dossier.contracts?.registryHash);
+    const historicalRegistrySafe = Boolean(historicalRegistryAvailable && Object.values(historicalRegistry?.contracts || {}).every(c => c?.mayPromoteCanonical !== true));
     const currentRegistryMatches = Boolean(currentRegistry?.registryHash && currentRegistry.registryHash === dossier.contracts?.registryHash);
 
     return {
-      format: 'JSONDB-PROOF-CARRYING-RECOVERY-PLAN-VERIFY-2',
+      format: 'JSONDB-PROOF-CARRYING-RECOVERY-PLAN-VERIFY-3',
       id: dossier.id,
-      valid: staticValid && coreValid && plan.valid && policy.valid && cryptoValid && forwardValid && terminalDenied && historicalRegistryAvailable,
+      valid: staticValid && coreValid && plan.valid && policy.valid && cryptoValid && forwardValid && terminalDenied && historicalRegistrySafe,
+      readOnly,
       staticValid,
       coreValid,
       navigatorValid: plan.valid,
@@ -140,10 +143,12 @@ class ProofCarryingRecoveryPlan {
       forwardWitnessValid: forwardValid,
       terminalPromotionDenied: terminalDenied,
       historicalRegistryAvailable,
+      historicalRegistrySafe,
       currentRegistryMatches,
       policyDriftedSinceDossier: historicalRegistryAvailable && !currentRegistryMatches,
       goal: dossier.navigator?.goal,
-      source: dossier.navigator?.source?.id || null
+      source: dossier.navigator?.source?.id || null,
+      doctrine: 'Proof-plan verification may traverse historical policy evidence without hydrating or rewriting policy state.'
     };
   }
 }
