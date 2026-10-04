@@ -184,16 +184,19 @@ class LastSaviorArchive {
     const polyhash = await this.k.polyhash.verify({ ...copy, archiveHash: receipt.archiveHash }, receipt.polyhash).catch(error => ({ valid: false, error: error.message }));
     const spacetimeOkay = ['NOT_PRESENT','RECOVERED','PARTIAL'].includes(spacetime.status);
 
-    const historicalRegistryCopy = historicalContracts ? { ...historicalContracts } : null;
-    if (historicalRegistryCopy) delete historicalRegistryCopy.registryHash;
-    const historicalRegistryHashValid = Boolean(historicalRegistryCopy && digest(historicalRegistryCopy) === archivedContracts?.registryHash && historicalContracts.registryHash === archivedContracts?.registryHash);
-    const historicalContractsNoAutoPromoters = Boolean(historicalContracts && Object.values(historicalContracts.contracts || {}).every(c => c?.mayPromoteCanonical !== true));
+    const historicalValidation = this.k.recoveryContracts.validateRegistry(historicalContracts);
+    const historicalRegistryHashValid = Boolean(
+      historicalContracts &&
+      historicalContracts.registryHash === archivedContracts?.registryHash &&
+      historicalValidation.computedRegistryHash === archivedContracts?.registryHash
+    );
+    const historicalContractsNoAutoPromoters = Boolean(historicalValidation.automaticPromoters === 0);
     const contractsAtArchiveSafe = Boolean(
       archivedContracts?.valid &&
       Number(archivedContracts?.automaticPromoters || 0) === 0 &&
       Number(archivedContracts?.violations || 0) === 0 &&
       historicalRegistryHashValid &&
-      historicalContractsNoAutoPromoters
+      historicalValidation.valid
     );
     const currentContractRegistryHealthy = readOnly ? currentContracts?.valid === true : Boolean(currentContracts?.registryHash);
     const currentContractRegistryMatchesArchive = Boolean(currentContractRegistryHealthy && archivedContracts?.registryHash && currentContracts?.registryHash === archivedContracts.registryHash);
@@ -218,7 +221,7 @@ class LastSaviorArchive {
     const historicalValid = staticValid && coreValid && independent.federation && independent.rosetta && independent.civilizationSeed && independent.quaternary && independent.spacetime && independent.semanticFossil && independent.recoveryContractsAtArchive && independent.shadowLawRecord && independent.forwardWitness && independent.polyhash && (independent.shadowLawLive !== false);
 
     return {
-      format: 'JSONDB-LAST-SAVIOR-VERIFY-8',
+      format: 'JSONDB-LAST-SAVIOR-VERIFY-9',
       id: receipt.id,
       valid: historicalValid,
       readOnly,
@@ -243,6 +246,8 @@ class LastSaviorArchive {
         archived: archivedContracts,
         historicalRegistryAvailable: Boolean(historicalContracts),
         historicalRegistryHashValid,
+        historicalRegistrySafe: historicalValidation.valid,
+        historicalRegistryViolations: historicalValidation.violations || [],
         historicalContractsNoAutoPromoters,
         currentRegistryHealthy: currentContractRegistryHealthy,
         currentRegistryHash: currentContracts?.registryHash || null,
@@ -253,7 +258,7 @@ class LastSaviorArchive {
       forwardWitness: { valid: forwardValid, chainValid: forwardChain.valid, record: forwardRecord },
       diaspora,
       polyhash,
-      doctrine: 'Historical archive validity is resolved against the archived content-addressed Recovery Contract registry. Later policy drift is reported separately and does not retroactively invalidate the archive. Read-only verification does not hydrate policy history.'
+      doctrine: 'Historical archive validity is resolved against a freshly revalidated archived Recovery Contract constitution. Later policy drift is reported separately and does not retroactively invalidate the archive. Read-only verification does not hydrate policy history.'
     };
   }
 }
