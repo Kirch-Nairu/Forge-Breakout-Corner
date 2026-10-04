@@ -7,6 +7,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const bootstrap = process.argv.includes('--bootstrap');
+const liveLastSavior = process.argv.includes('--live-last-savior');
 const blockedWrites = [];
 
 function summarizeArg(value) {
@@ -202,7 +203,10 @@ async function main() {
   checks.push(await check('latest-plan-mutation', () => kernel.planMutation.verify(null, { readOnly })));
   checks.push(await check('independent-mutation-audit', () => kernel.mutationAudit.verify(null, { readOnly })));
   checks.push(await check('latest-history-court', () => kernel.historyCourt.verify(null, { readOnly })));
-  checks.push(await check('latest-last-savior', () => kernel.lastSavior.verify(null, { live: false, readOnly })));
+  checks.push(await check(
+    liveLastSavior ? 'latest-last-savior-live-forensic' : 'latest-last-savior',
+    () => kernel.lastSavior.verify(null, { live: liveLastSavior, readOnly })
+  ));
 
   const after = readOnly ? await snapshotEvidenceSurface() : null;
   const evidenceSurfaceUnchanged = readOnly ? sameSnapshot(before, after) : null;
@@ -230,9 +234,10 @@ async function main() {
 
   const presentFailures = checks.filter(x => !x.ok);
   const report = {
-    format: 'JSONDB-RECOVERY-SELFTEST-5',
-    mode: bootstrap ? 'BOOTSTRAP_AND_VERIFY' : 'FORENSIC_READ_ONLY',
+    format: 'JSONDB-RECOVERY-SELFTEST-6',
+    mode: bootstrap ? 'BOOTSTRAP_AND_VERIFY' : (liveLastSavior ? 'FORENSIC_READ_ONLY_LIVE' : 'FORENSIC_READ_ONLY'),
     readOnly,
+    liveLastSavior,
     writeBarrierActive: readOnly,
     ok: presentFailures.length === 0,
     evidenceSurfaceUnchanged,
@@ -251,7 +256,9 @@ async function main() {
     failures: presentFailures.map(x => x.name),
     doctrine: bootstrap
       ? 'Bootstrap mode may initialize and migrate recovery metadata before verification; the canonical probe remains explicitly forensic.'
-      : 'Forensic mode installs a fail-closed filesystem write barrier before the recovery kernel is loaded, runs a deterministic read-only canonicalization probe, and compares content plus inode/device/link/mode/mtime/ctime evidence across the entire Savior tree. Access time is intentionally excluded. ABSENT optional artifacts do not fail the self-test; present invalid artifacts and any attempted write do.'
+      : liveLastSavior
+        ? 'Live forensic mode installs the fail-closed write barrier before loading the recovery kernel and verifies the fresh LAST SAVIOR archive against current live state without allowing initialization, repair, canonicalization persistence, challenge persistence, or any other evidence mutation.'
+        : 'Forensic mode installs a fail-closed filesystem write barrier before the recovery kernel is loaded, runs a deterministic read-only canonicalization probe, and compares content plus inode/device/link/mode/mtime/ctime evidence across the entire Savior tree. Access time is intentionally excluded. ABSENT optional artifacts do not fail the self-test; present invalid artifacts and any attempted write do.'
   };
 
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
