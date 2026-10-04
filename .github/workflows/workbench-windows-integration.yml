@@ -37,72 +37,73 @@ jobs:
         shell: pwsh
         run: node .\jsondb-lab\monster\jsonfs-retry-selftest.js
 
-      - name: Start Workbench on Windows
+      - name: Run Windows Workbench seed and benchmark end-to-end
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           $env:WORKBENCH_PORT = '7434'
-          $p = Start-Process node -ArgumentList '.\jsondb-lab\workbench\server.js' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\workbench-out.log" -RedirectStandardError "$env:RUNNER_TEMP\workbench-err.log"
-          Set-Content -Path "$env:RUNNER_TEMP\workbench.pid" -Value $p.Id
-          $ready = $false
-          for ($i = 0; $i -lt 80; $i++) {
-            try {
-              Invoke-RestMethod 'http://127.0.0.1:7434/api/schema' | ConvertTo-Json -Depth 20 | Set-Content "$env:RUNNER_TEMP\schema.json"
-              $ready = $true
-              break
-            } catch {
-              Start-Sleep -Milliseconds 250
+          $stdout = "$env:RUNNER_TEMP\workbench-out.log"
+          $stderr = "$env:RUNNER_TEMP\workbench-err.log"
+          $p = Start-Process node -ArgumentList '.\jsondb-lab\workbench\server.js' -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 80; $i++) {
+              if ($p.HasExited) {
+                Get-Content $stdout -ErrorAction SilentlyContinue
+                Get-Content $stderr -ErrorAction SilentlyContinue
+                throw "Workbench exited before readiness with code $($p.ExitCode)."
+              }
+              try {
+                $schema = Invoke-RestMethod 'http://127.0.0.1:7434/api/schema'
+                $ready = $true
+                break
+              } catch {
+                Start-Sleep -Milliseconds 250
+              }
             }
+            if (-not $ready) { throw 'Workbench failed to become ready on Windows.' }
+
+            if ($schema.authority -ne 'EXPLICIT_WRITE_APP') { throw "Wrong authority: $($schema.authority)" }
+            foreach ($id in @('forge','earth','jupiter','mars')) {
+              if (-not ($schema.domains.id -contains $id)) { throw "Missing known domain $id" }
+            }
+            foreach ($id in @('kirion-saturn','project-second-brain')) {
+              if (-not ($schema.unresolvedDomains.id -contains $id)) { throw "Missing unresolved domain $id" }
+            }
+
+            $headers = @{ 'X-Kirion-Workbench-Intent' = 'write' }
+            $seedBody = @{ scale='smoke'; seed='WINDOWS-CI'; runKey='windows-ci'; batchSize=125 } | ConvertTo-Json
+            $seed = Invoke-RestMethod 'http://127.0.0.1:7434/api/seed' -Method Post -Headers $headers -ContentType 'application/json' -Body $seedBody
+            if ($seed.totalRows -lt 600) { throw "Unexpected seed volume: $($seed.totalRows)" }
+            Write-Host "Seeded $($seed.totalRows) rows across $($seed.results.Count) collections."
+
+            $queryBody = @{ query = @{ from='benchmark_records'; where=@{ field='priority'; op='eq'; value=1 }; limit=100 } } | ConvertTo-Json -Depth 10
+            $query = Invoke-RestMethod 'http://127.0.0.1:7434/api/query' -Method Post -Headers $headers -ContentType 'application/json' -Body $queryBody
+            if ($query.explain.access.type -ne 'index-scan') { throw "Planner did not choose index-scan: $($query.explain.access.type)" }
+            if ($query.explain.access.index -ne 'benchmark_priority') { throw "Wrong index: $($query.explain.access.index)" }
+            Write-Host "Indexed query examined $($query.explain.examined) rows in $($query.explain.durationMs) ms."
+
+            $benchBody = @{ advancedIndexes=$true; durability=$false; vectorBuildLimit=1000 } | ConvertTo-Json
+            $bench = Invoke-RestMethod 'http://127.0.0.1:7434/api/benchmark' -Method Post -Headers $headers -ContentType 'application/json' -Body $benchBody
+            if ($bench.failed -ne 0) {
+              $bench | ConvertTo-Json -Depth 30
+              throw "Benchmark failures: $($bench.failed)"
+            }
+            Write-Host "Benchmark passed $($bench.passed)/$($bench.total) cases in $($bench.totalDurationMs) ms."
+
+            $state = Invoke-RestMethod 'http://127.0.0.1:7434/api/state'
+            if ($state.totals.workbenchRows -lt 600) { throw "Final rows too low: $($state.totals.workbenchRows)" }
+            if ($state.lastBenchmark.failed -ne 0) { throw 'Last benchmark unhealthy.' }
+            Write-Host "Final rows=$($state.totals.workbenchRows) tx=$($state.engine.nextTx) lsn=$($state.engine.currentLsn)"
           }
-          if (-not $ready) {
-            Get-Content "$env:RUNNER_TEMP\workbench-out.log" -ErrorAction SilentlyContinue
-            Get-Content "$env:RUNNER_TEMP\workbench-err.log" -ErrorAction SilentlyContinue
-            throw 'Workbench failed to start on Windows.'
+          catch {
+            Write-Host '=== WORKBENCH STDOUT ==='
+            Get-Content $stdout -ErrorAction SilentlyContinue
+            Write-Host '=== WORKBENCH STDERR ==='
+            Get-Content $stderr -ErrorAction SilentlyContinue
+            throw
           }
-
-      - name: Seed KIRION smoke workload on Windows
-        shell: pwsh
-        run: |
-          $headers = @{ 'X-Kirion-Workbench-Intent' = 'write' }
-          $body = @{ scale='smoke'; seed='WINDOWS-CI'; runKey='windows-ci'; batchSize=125 } | ConvertTo-Json
-          $seed = Invoke-RestMethod 'http://127.0.0.1:7434/api/seed' -Method Post -Headers $headers -ContentType 'application/json' -Body $body
-          if ($seed.totalRows -lt 600) { throw "Unexpected seed volume: $($seed.totalRows)" }
-          $seed | ConvertTo-Json -Depth 20 | Set-Content "$env:RUNNER_TEMP\seed.json"
-          Write-Host "Seeded $($seed.totalRows) rows across $($seed.results.Count) collections."
-
-      - name: Prove Windows planner and advanced benchmark
-        shell: pwsh
-        run: |
-          $headers = @{ 'X-Kirion-Workbench-Intent' = 'write' }
-          $queryBody = @{ query = @{ from='benchmark_records'; where=@{ field='priority'; op='eq'; value=1 }; limit=100 } } | ConvertTo-Json -Depth 10
-          $query = Invoke-RestMethod 'http://127.0.0.1:7434/api/query' -Method Post -Headers $headers -ContentType 'application/json' -Body $queryBody
-          if ($query.explain.access.type -ne 'index-scan') { throw "Planner did not choose index-scan: $($query.explain.access.type)" }
-          if ($query.explain.access.index -ne 'benchmark_priority') { throw "Wrong index: $($query.explain.access.index)" }
-
-          $benchBody = @{ advancedIndexes=$true; durability=$false; vectorBuildLimit=1000 } | ConvertTo-Json
-          $bench = Invoke-RestMethod 'http://127.0.0.1:7434/api/benchmark' -Method Post -Headers $headers -ContentType 'application/json' -Body $benchBody
-          if ($bench.failed -ne 0) { $bench | ConvertTo-Json -Depth 30; throw "Benchmark failures: $($bench.failed)" }
-          Write-Host "Benchmark passed $($bench.passed)/$($bench.total) cases in $($bench.totalDurationMs) ms."
-
-      - name: Inspect Windows final state
-        shell: pwsh
-        run: |
-          $state = Invoke-RestMethod 'http://127.0.0.1:7434/api/state'
-          if ($state.totals.workbenchRows -lt 600) { throw "Final rows too low: $($state.totals.workbenchRows)" }
-          if ($state.lastBenchmark.failed -ne 0) { throw 'Last benchmark unhealthy.' }
-          Write-Host "Final rows=$($state.totals.workbenchRows) tx=$($state.engine.nextTx) lsn=$($state.engine.currentLsn)"
-
-      - name: Print Workbench logs on failure
-        if: failure()
-        shell: pwsh
-        run: |
-          Get-Content "$env:RUNNER_TEMP\workbench-out.log" -ErrorAction SilentlyContinue
-          Get-Content "$env:RUNNER_TEMP\workbench-err.log" -ErrorAction SilentlyContinue
-
-      - name: Stop Workbench
-        if: always()
-        shell: pwsh
-        run: |
-          if (Test-Path "$env:RUNNER_TEMP\workbench.pid") {
-            $pidValue = Get-Content "$env:RUNNER_TEMP\workbench.pid"
-            Stop-Process -Id $pidValue -Force -ErrorAction SilentlyContinue
+          finally {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
           }
