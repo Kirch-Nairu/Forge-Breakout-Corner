@@ -151,13 +151,15 @@ class MemoryPalace {
   }
 
   async verify(id = null, options = {}) {
-    await this.init();
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const manifest = id ? await readJson(path.join(this.manifests, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!manifest) return { status: 'ABSENT', valid: false, reason: 'Memory Palace manifest missing.' };
+    if (!manifest) return { status: 'ABSENT', valid: false, readOnly, reason: 'Memory Palace manifest missing.' };
     const buffers = [];
     const chunkResults = [];
+    const repairPrimary = readOnly ? false : options.repairPrimary !== false;
     for (const spec of manifest.chunks || []) {
-      const read = await this.readChunk(spec.hash, { repairPrimary: options.repairPrimary !== false });
+      const read = await this.readChunk(spec.hash, { repairPrimary });
       chunkResults.push({ hash: spec.hash, recovered: Boolean(read.buffer), source: read.source, evidence: read.evidence });
       if (!read.buffer) continue;
       buffers.push(read.buffer);
@@ -168,9 +170,10 @@ class MemoryPalace {
     const merkle = merkleRoot((manifest.chunks || []).map(x => x.hash));
     const valid = Boolean(allRecovered && worldHash === manifest.worldSha256 && merkle === manifest.chunkMerkleRoot);
     return {
-      format: 'JSONDB-MEMORY-PALACE-VERIFY-1', id: manifest.id,
+      format: 'JSONDB-MEMORY-PALACE-VERIFY-2', id: manifest.id,
       status: valid ? 'TRUSTED' : allRecovered ? 'HASH_MISMATCH' : 'INCOMPLETE',
-      valid, expectedWorldSha256: manifest.worldSha256, reconstructedWorldSha256: worldHash,
+      valid, readOnly, repairPrimaryAttempted: repairPrimary,
+      expectedWorldSha256: manifest.worldSha256, reconstructedWorldSha256: worldHash,
       expectedMerkleRoot: manifest.chunkMerkleRoot, computedMerkleRoot: merkle,
       recoveredChunks: buffers.length, totalChunks: manifest.chunks?.length || 0,
       chunkResults,
