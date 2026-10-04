@@ -102,7 +102,8 @@ class HashWitnessCouncil {
     const member = registry.members.find(x => x.id === memberId);
     if (!member) throw new Error(`Unknown hash witness member ${memberId}`);
     for (let n = 0; n < count; n++) {
-      const ordinal = Number(member.nextOrdinal || 1)++;
+      const ordinal = Number(member.nextOrdinal || 1);
+      member.nextOrdinal = ordinal + 1;
       const keyId = `${member.id}-ots-${String(ordinal).padStart(6,'0')}`;
       const pair = generateLamportKey(keyId);
       await atomicJson(path.join(this.keys, `${keyId}.private.json`), pair.privateKey);
