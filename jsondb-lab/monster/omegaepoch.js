@@ -167,11 +167,11 @@ class OmegaEpochSealer {
     let live = null;
     if (options.live === true) {
       const world = await this.k.world();
-      const canonical = await this.k.canonicalQuorum.verify(world, { freezeOnDivergence: false });
+      const canonical = await this.k.canonicalQuorum.verify(world, { freezeOnDivergence: false, readOnly });
       live = { semanticWorldSha256: canonical.semanticSha256, matchesEpoch: canonical.semanticSha256 === epoch.semanticWorldSha256 };
     }
     return {
-      format: 'JSONDB-OMEGA-EPOCH-VERIFY-2', id: epoch.id,
+      format: 'JSONDB-OMEGA-EPOCH-VERIFY-3', id: epoch.id,
       valid: staticValid && (!polyhash || polyhash.valid) && passport.valid && compatibility.valid && (!live || live.matchesEpoch),
       readOnly,
       staticValid, expectedEpochHash: epoch.epochHash, computedEpochHash,
