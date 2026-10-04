@@ -3,12 +3,17 @@
 const crypto = require('crypto');
 const { clone, now, hashValue } = require('./jsonfs');
 
+const VOLATILE_KEYS = new Set(['createdAt', 'updatedAt']);
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(k => [k, stable(value[k])]));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).filter(k => !VOLATILE_KEYS.has(k)).sort().map(k => [k, stable(value[k])]));
   return value;
 }
 function digest(value) { return crypto.createHash('sha256').update(JSON.stringify(stable(value))).digest('hex'); }
+function deterministicUuid(seed) {
+  const h = crypto.createHash('sha256').update(seed).digest('hex');
+  return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-a${h.slice(17,20)}-${h.slice(20,32)}`;
+}
 
 class QuantumInspiredLab {
   constructor(engine, savior = null) {
@@ -22,6 +27,16 @@ class QuantumInspiredLab {
     return out;
   }
 
+  freezeOps(base, ops) {
+    const baseHash = digest(base);
+    return clone(ops).map((op, i) => {
+      if (op.type !== 'insert') return op;
+      op.row ||= {};
+      op.row.id ||= deterministicUuid(`${baseHash}:${i}:${digest(op)}`);
+      return op;
+    });
+  }
+
   apply(world, ops) {
     const result = clone(world);
     const effects = [];
@@ -30,7 +45,7 @@ class QuantumInspiredLab {
       if (!table) throw new Error(`Candidate references missing collection ${op.collection}`);
       if (op.type === 'insert') {
         const row = clone(op.row || {});
-        row.id ||= crypto.randomUUID();
+        row.id ||= deterministicUuid(`fallback:${digest({ table: op.collection, row })}`);
         row.createdAt ||= now();
         row.updatedAt = now();
         if (table.rows.some(r => r.id === row.id)) throw new Error(`Duplicate candidate id ${row.id}`);
@@ -101,14 +116,15 @@ class QuantumInspiredLab {
   }
 
   async tripleExecute(base, ops) {
+    const frozenOps = this.freezeOps(base, ops);
     const executions = [];
     for (let i = 0; i < 3; i++) {
-      const applied = this.apply(base, ops);
+      const applied = this.apply(base, frozenOps);
       executions.push({ replica: i + 1, hash: digest(applied.world), effects: applied.effects, world: applied.world });
     }
     const hashes = executions.map(x => x.hash);
     const unanimous = new Set(hashes).size === 1;
-    return { unanimous, hash: unanimous ? hashes[0] : null, executions };
+    return { unanimous, hash: unanimous ? hashes[0] : null, executions, operations: frozenOps };
   }
 
   amplitude(scores) {
@@ -134,9 +150,9 @@ class QuantumInspiredLab {
           continue;
         }
         const assessment = this.invariantScore(triple.executions[0].world, spec.invariants || []);
-        const changePenalty = (candidate.ops || []).length * Number(spec.operationPenalty ?? 0.05);
+        const changePenalty = triple.operations.length * Number(spec.operationPenalty ?? 0.05);
         const score = assessment.score - changePenalty + Number(candidate.bias || 0);
-        worlds.push({ index: i, name: candidate.name || `world-${i + 1}`, viable: true, score, worldHash: triple.hash, effects: triple.executions[0].effects, assessment, ops: candidate.ops || [] });
+        worlds.push({ index: i, name: candidate.name || `world-${i + 1}`, viable: true, score, worldHash: triple.hash, effects: triple.executions[0].effects, assessment, ops: triple.operations });
       } catch (error) {
         worlds.push({ index: i, name: candidate.name || `world-${i + 1}`, viable: false, reason: error.message });
       }
@@ -149,6 +165,7 @@ class QuantumInspiredLab {
     const winner = viable[0];
     return {
       metaphor: 'quantum-inspired speculative execution; amplitudes are softmax scores, not physics',
+      comparison: 'volatile createdAt/updatedAt values are excluded from candidate determinism hashes; insert IDs are deterministically frozen before triple execution',
       collapsed: false, baseHash, candidateCount: candidates.length, worlds,
       winner: { index: winner.index, name: winner.name, score: winner.score, amplitude: winner.amplitude, worldHash: winner.worldHash, effects: winner.effects },
       winningOps: winner.ops
@@ -172,4 +189,4 @@ class QuantumInspiredLab {
   }
 }
 
-module.exports = { QuantumInspiredLab, digest, stable };
+module.exports = { QuantumInspiredLab, digest, stable, deterministicUuid };
