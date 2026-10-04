@@ -5,17 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>OMEGA Observatory</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/index-lab.css">
+  <link rel="stylesheet" href="/recovery-theater.css">
 </head>
 <body>
   <div class="shell">
     <aside class="rail">
-      <div class="brand">
-        <div class="brand-mark">Ω</div>
-        <div>
-          <strong>OMEGA</strong>
-          <span>OBSERVATORY</span>
-        </div>
-      </div>
+      <div class="brand"><div class="brand-mark">Ω</div><div><strong>OMEGA</strong><span>OBSERVATORY</span></div></div>
       <nav class="nav" aria-label="Observatory sections">
         <button class="nav-item active" data-view="overview"><span>01</span>Overview</button>
         <button class="nav-item" data-view="flow"><span>02</span>Flow</button>
@@ -23,24 +19,15 @@
         <button class="nav-item" data-view="data"><span>04</span>Data</button>
         <button class="nav-item" data-view="index"><span>05</span>Index Lab</button>
         <button class="nav-item" data-view="recovery"><span>06</span>Recovery</button>
+        <button class="nav-item" data-view="authority"><span>07</span>Authority</button>
       </nav>
-      <div class="rail-foot">
-        <div class="live-row"><span class="live-dot"></span><span>LIVE</span></div>
-        <code>127.0.0.1</code>
-        <small>READ-ONLY OBSERVER</small>
-      </div>
+      <div class="rail-foot"><div class="live-row"><span class="live-dot"></span><span>LIVE</span></div><code>127.0.0.1</code><small>READ-ONLY OBSERVER</small></div>
     </aside>
 
     <main class="main">
       <header class="topbar">
-        <div>
-          <p class="eyebrow">JSONDB MONSTER // VISUAL SYSTEM STATE</p>
-          <h1 id="view-title">Control Room</h1>
-        </div>
-        <div class="top-actions">
-          <div class="latency"><span id="connection-dot"></span><span id="connection-text">CONNECTING</span></div>
-          <button id="refresh" class="ghost">Refresh snapshot</button>
-        </div>
+        <div><p class="eyebrow">JSONDB MONSTER // VISUAL SYSTEM STATE</p><h1 id="view-title">Control Room</h1></div>
+        <div class="top-actions"><div class="latency"><span id="connection-dot"></span><span id="connection-text">CONNECTING</span></div><button id="refresh" class="ghost">Refresh snapshot</button></div>
       </header>
 
       <section class="view active" id="view-overview">
@@ -50,187 +37,103 @@
           <article><span>LAST SAVIOR</span><strong id="last-savior-status">ABSENT</strong></article>
           <article><span>CONTRACTS</span><strong id="contracts-status">ABSENT</strong></article>
         </div>
-
         <div class="metric-grid">
           <article class="metric"><span>Collections</span><strong id="metric-collections">0</strong><small>canonical collections</small></article>
           <article class="metric"><span>Rows</span><strong id="metric-rows">0</strong><small>current rows</small></article>
           <article class="metric"><span>Current LSN</span><strong id="metric-lsn">0</strong><small>write-ahead position</small></article>
           <article class="metric"><span>Firewall seq</span><strong id="metric-firewall">0</strong><small>authority decisions</small></article>
         </div>
-
         <div class="overview-grid">
           <article class="panel flow-panel">
-            <div class="panel-head">
-              <div><span class="kicker">LIVE DATA FLOW</span><h2>Engine bloodstream</h2></div>
-              <span class="tag">OBSERVED</span>
-            </div>
+            <div class="panel-head"><div><span class="kicker">LIVE DATA FLOW</span><h2>Engine bloodstream</h2></div><span class="tag">OBSERVED</span></div>
             <div class="flow-stage compact" id="overview-flow-stage">
               <canvas id="overview-flow-canvas"></canvas>
-              <div class="flow-node" data-node="app"><b>APP</b><small>intent</small></div>
-              <div class="flow-node" data-node="tx"><b>TX</b><small>transaction</small></div>
-              <div class="flow-node" data-node="wal"><b>WAL</b><small>durability</small></div>
-              <div class="flow-node" data-node="current"><b>CURRENT</b><small>state</small></div>
-              <div class="flow-node" data-node="index"><b>INDEX</b><small>lookup</small></div>
-              <div class="flow-node" data-node="history"><b>HISTORY</b><small>time</small></div>
-              <div class="flow-node" data-node="savior"><b>SAVIOR</b><small>survival</small></div>
+              <div class="flow-node" data-node="app"><b>APP</b><small>intent</small></div><div class="flow-node" data-node="tx"><b>TX</b><small>transaction</small></div><div class="flow-node" data-node="wal"><b>WAL</b><small>durability</small></div><div class="flow-node" data-node="current"><b>CURRENT</b><small>state</small></div><div class="flow-node" data-node="index"><b>INDEX</b><small>lookup</small></div><div class="flow-node" data-node="history"><b>HISTORY</b><small>time</small></div><div class="flow-node" data-node="savior"><b>SAVIOR</b><small>survival</small></div>
             </div>
           </article>
-
           <article class="panel activity-panel">
-            <div class="panel-head">
-              <div><span class="kicker">OBSERVATION STREAM</span><h2>Recent movement</h2></div>
-              <span class="tag" id="event-count">0 EVENTS</span>
-            </div>
-            <div id="activity-list" class="activity-list">
-              <div class="empty">Waiting for filesystem movement…</div>
-            </div>
+            <div class="panel-head"><div><span class="kicker">OBSERVATION STREAM</span><h2>Recent movement</h2></div><span class="tag" id="event-count">0 EVENTS</span></div>
+            <div id="activity-list" class="activity-list"><div class="empty">Waiting for filesystem movement…</div></div>
           </article>
         </div>
-
-        <article class="panel collection-panel">
-          <div class="panel-head"><div><span class="kicker">CURRENT STATE</span><h2>Collections</h2></div><span class="tag">READ ONLY</span></div>
-          <div id="collection-cards" class="collection-cards"><div class="empty">No collection state observed yet.</div></div>
-        </article>
+        <article class="panel collection-panel"><div class="panel-head"><div><span class="kicker">CURRENT STATE</span><h2>Collections</h2></div><span class="tag">READ ONLY</span></div><div id="collection-cards" class="collection-cards"><div class="empty">No collection state observed yet.</div></div></article>
       </section>
 
       <section class="view" id="view-flow">
         <article class="panel hero-flow">
-          <div class="panel-head">
-            <div><span class="kicker">LIVE MODE</span><h2>JSON movement visualizer</h2></div>
-            <div class="legend"><span><i class="cyan"></i>data</span><span><i class="amber"></i>history</span><span><i class="purple"></i>recovery</span></div>
-          </div>
+          <div class="panel-head"><div><span class="kicker">LIVE MODE</span><h2>JSON movement visualizer</h2></div><div class="legend"><span><i class="cyan"></i>data</span><span><i class="amber"></i>history</span><span><i class="purple"></i>recovery</span></div></div>
           <p class="muted">Particles are driven by normalized observed changes. They visualize movement between architectural stages; they do not claim to reproduce CPU instruction order.</p>
           <div class="flow-stage large" id="flow-stage">
             <canvas id="flow-canvas"></canvas>
-            <div class="flow-node" data-node="app"><b>APPLICATION</b><small>intent</small></div>
-            <div class="flow-node" data-node="tx"><b>TRANSACTION</b><small>atomic boundary</small></div>
-            <div class="flow-node" data-node="wal"><b>WAL</b><small>append history</small></div>
-            <div class="flow-node" data-node="current"><b>CURRENT</b><small>canonical rows</small></div>
-            <div class="flow-node" data-node="index"><b>INDEXES</b><small>derived lookup</small></div>
-            <div class="flow-node" data-node="history"><b>HISTORY</b><small>versions / snapshots</small></div>
-            <div class="flow-node" data-node="savior"><b>LAST SAVIOR</b><small>survival evidence</small></div>
+            <div class="flow-node" data-node="app"><b>APPLICATION</b><small>intent</small></div><div class="flow-node" data-node="tx"><b>TRANSACTION</b><small>atomic boundary</small></div><div class="flow-node" data-node="wal"><b>WAL</b><small>append history</small></div><div class="flow-node" data-node="current"><b>CURRENT</b><small>canonical rows</small></div><div class="flow-node" data-node="index"><b>INDEXES</b><small>derived lookup</small></div><div class="flow-node" data-node="history"><b>HISTORY</b><small>versions / snapshots</small></div><div class="flow-node" data-node="savior"><b>LAST SAVIOR</b><small>survival evidence</small></div>
           </div>
           <div class="event-inspector" id="event-inspector"><span>Latest event</span><code>waiting…</code></div>
         </article>
       </section>
 
       <section class="view" id="view-wal">
+        <article class="panel">
+          <div class="panel-head"><div><span class="kicker">WRITE-AHEAD LOG // REPLAY MODE</span><h2>Time scrubber</h2></div><span class="tag">BROWSER MEMORY ONLY</span></div>
+          <div class="wal-replay-shell">
+            <div class="wal-replay-main">
+              <div class="wal-replay-controls">
+                <button class="ghost" id="wal-replay-prev">← Prev</button><button class="ghost" id="wal-replay-play">▶ Replay</button><button class="ghost" id="wal-replay-next">Next →</button>
+                <select id="wal-replay-speed"><option value="1200">0.5×</option><option value="650" selected>1×</option><option value="250">2×</option><option value="90">6×</option></select>
+                <input id="wal-scrubber" type="range" min="0" max="0" value="0"><code id="wal-replay-position">0 / 0</code>
+              </div>
+              <div id="wal-replay-pulse" class="wal-replay-pulse">waiting for WAL…</div>
+              <div id="wal-replay-rail" class="wal-replay-rail"></div>
+            </div>
+            <div id="wal-replay-detail" class="wal-replay-detail">No WAL entries observed.</div>
+          </div>
+        </article>
         <div class="split">
-          <article class="panel">
-            <div class="panel-head"><div><span class="kicker">WRITE-AHEAD LOG</span><h2>Recent entries</h2></div><span class="tag" id="wal-count">0</span></div>
-            <div id="wal-list" class="wal-list"><div class="empty">No WAL entries observed.</div></div>
-          </article>
-          <article class="panel detail-panel">
-            <div class="panel-head"><div><span class="kicker">SELECTED ENTRY</span><h2>WAL inspector</h2></div></div>
-            <pre id="wal-detail">Select a WAL entry.</pre>
-          </article>
+          <article class="panel"><div class="panel-head"><div><span class="kicker">RAW WAL</span><h2>Recent entries</h2></div><span class="tag" id="wal-count">0</span></div><div id="wal-list" class="wal-list"><div class="empty">No WAL entries observed.</div></div></article>
+          <article class="panel detail-panel"><div class="panel-head"><div><span class="kicker">SELECTED ENTRY</span><h2>Raw inspector</h2></div></div><pre id="wal-detail">Select a WAL entry.</pre></article>
         </div>
       </section>
 
       <section class="view" id="view-data">
-        <article class="panel">
-          <div class="panel-head"><div><span class="kicker">CANONICAL COLLECTIONS</span><h2>Current data topology</h2></div><span class="tag">NO EDITING</span></div>
-          <div id="data-table-wrap" class="table-wrap"><table><thead><tr><th>Collection</th><th>Rows</th><th>Revision</th><th>Indexes</th><th>Updated</th></tr></thead><tbody id="data-table"></tbody></table></div>
-        </article>
+        <article class="panel"><div class="panel-head"><div><span class="kicker">CANONICAL COLLECTIONS</span><h2>Current data topology</h2></div><span class="tag">NO EDITING</span></div><div id="data-table-wrap" class="table-wrap"><table><thead><tr><th>Collection</th><th>Rows</th><th>Revision</th><th>Indexes</th><th>Updated</th></tr></thead><tbody id="data-table"></tbody></table></div></article>
       </section>
 
       <section class="view" id="view-index">
-        <div class="index-truth-banner">
-          <div><span class="kicker">ENGINE TRUTH</span><strong>HASH MAP INDEX</strong></div>
-          <p>The persisted MONSTER index is bucket-based. The left theater replays that real structure. The sorting theater is explicitly browser-only explanation using real rows.</p>
-          <span class="truth-badge">NO FAKE TRACE</span>
-        </div>
-
-        <article class="panel index-controls-panel">
-          <div class="panel-head">
-            <div><span class="kicker">INDEX SOURCE</span><h2>Choose the live collection</h2></div>
-            <span class="tag" id="index-live-state">WAITING</span>
-          </div>
-          <div class="control-grid">
-            <label><span>Collection</span><select id="index-collection"></select></label>
-            <label><span>Persisted index</span><select id="index-name"></select></label>
-            <button class="ghost control-button" id="index-reload">Reload artifact</button>
-          </div>
-          <div class="index-source-facts">
-            <span>Built <b id="index-built-at">—</b></span>
-            <span>TX <b id="index-tx">0</b></span>
-            <span>Rows <b id="index-row-count">0</b></span>
-            <span>Distinct buckets <b id="index-distinct">0</b></span>
-          </div>
-        </article>
-
+        <div class="index-truth-banner"><div><span class="kicker">ENGINE TRUTH</span><strong>HASH MAP INDEX</strong></div><p>The persisted MONSTER index is bucket-based. The left theater replays that real structure. The sorting theater is explicitly browser-only explanation using real rows.</p><span class="truth-badge">NO FAKE TRACE</span></div>
+        <article class="panel index-controls-panel"><div class="panel-head"><div><span class="kicker">INDEX SOURCE</span><h2>Choose the live collection</h2></div><span class="tag" id="index-live-state">WAITING</span></div><div class="control-grid"><label><span>Collection</span><select id="index-collection"></select></label><label><span>Persisted index</span><select id="index-name"></select></label><button class="ghost control-button" id="index-reload">Reload artifact</button></div><div class="index-source-facts"><span>Built <b id="index-built-at">—</b></span><span>TX <b id="index-tx">0</b></span><span>Rows <b id="index-row-count">0</b></span><span>Distinct buckets <b id="index-distinct">0</b></span></div></article>
         <div class="index-lab-grid">
-          <article class="panel actual-index-panel">
-            <div class="panel-head">
-              <div><span class="kicker">STRUCTURE REPLAY</span><h2>Actual hash-bucket build</h2></div>
-              <button class="ghost" id="index-play">▶ Replay build</button>
-            </div>
-            <p class="muted">Replays the engine's real build rule against current row order: encode configured field value(s) → bucket key → append row ID. This is a reconstruction of the documented build semantics, not a timestamped runtime trace.</p>
-            <div class="index-replay-status"><code id="index-replay-status">Select an index.</code></div>
-            <div class="index-theater">
-              <div class="index-row-source">
-                <span class="lane-title">CURRENT ROW ORDER</span>
-                <div id="index-row-lane" class="index-row-lane"></div>
-              </div>
-              <div class="bucket-source">
-                <span class="lane-title">PERSISTED HASH BUCKETS</span>
-                <div id="index-bucket-grid" class="index-bucket-grid"></div>
-              </div>
-            </div>
-          </article>
-
-          <article class="panel sort-panel">
-            <div class="panel-head">
-              <div><span class="kicker">EXPLAIN MODE</span><h2>Sorting theater</h2></div>
-              <span class="tag explain-tag">BROWSER MEMORY ONLY</span>
-            </div>
-            <p class="muted">The engine does not sort to build its hash index. This lab copies the observed rows into browser memory so you can watch comparison algorithms without touching JSONDB.</p>
-            <div class="sort-controls">
-              <label><span>Field</span><select id="sort-field"></select></label>
-              <label><span>Algorithm</span><select id="sort-algorithm"><option value="insertion">Insertion sort</option><option value="bubble">Bubble sort</option><option value="selection">Selection sort</option></select></label>
-              <label><span>Speed</span><select id="sort-speed"><option value="900">0.5×</option><option value="420" selected>1×</option><option value="180">2×</option><option value="65">6×</option></select></label>
-              <button class="ghost" id="sort-play">▶ Play</button>
-              <button class="ghost" id="sort-reset">Reset</button>
-            </div>
-            <div class="sort-metrics">
-              <span>Comparisons <b id="sort-comparisons">0</b></span>
-              <span>Moves / swaps <b id="sort-moves">0</b></span>
-              <span>Status <b id="sort-status">READY</b></span>
-            </div>
-            <div id="sort-stage" class="sort-stage"><div class="empty">Choose a sortable field.</div></div>
-          </article>
+          <article class="panel actual-index-panel"><div class="panel-head"><div><span class="kicker">STRUCTURE REPLAY</span><h2>Actual hash-bucket build</h2></div><button class="ghost" id="index-play">▶ Replay build</button></div><p class="muted">Replays the engine's real build rule against current row order: encode configured field value(s) → bucket key → append row ID. This is a reconstruction of the documented build semantics, not a timestamped runtime trace.</p><div class="index-replay-status"><code id="index-replay-status">Select an index.</code></div><div class="index-theater"><div class="index-row-source"><span class="lane-title">CURRENT ROW ORDER</span><div id="index-row-lane" class="index-row-lane"></div></div><div class="bucket-source"><span class="lane-title">PERSISTED HASH BUCKETS</span><div id="index-bucket-grid" class="index-bucket-grid"></div></div></div></article>
+          <article class="panel sort-panel"><div class="panel-head"><div><span class="kicker">EXPLAIN MODE</span><h2>Sorting theater</h2></div><span class="tag explain-tag">BROWSER MEMORY ONLY</span></div><p class="muted">The engine does not sort to build its hash index. This lab copies the observed rows into browser memory so you can watch comparison algorithms without touching JSONDB.</p><div class="sort-controls"><label><span>Field</span><select id="sort-field"></select></label><label><span>Algorithm</span><select id="sort-algorithm"><option value="insertion">Insertion sort</option><option value="bubble">Bubble sort</option><option value="selection">Selection sort</option></select></label><label><span>Speed</span><select id="sort-speed"><option value="900">0.5×</option><option value="420" selected>1×</option><option value="180">2×</option><option value="65">6×</option></select></label><button class="ghost" id="sort-play">▶ Play</button><button class="ghost" id="sort-reset">Reset</button></div><div class="sort-metrics"><span>Comparisons <b id="sort-comparisons">0</b></span><span>Moves / swaps <b id="sort-moves">0</b></span><span>Status <b id="sort-status">READY</b></span></div><div id="sort-stage" class="sort-stage"><div class="empty">Choose a sortable field.</div></div></article>
         </div>
       </section>
 
       <section class="view" id="view-recovery">
-        <div class="recovery-grid">
-          <article class="panel recovery-orbit">
-            <div class="panel-head"><div><span class="kicker">SURVIVAL ARCHITECTURE</span><h2>Recovery constellation</h2></div><span class="tag" id="recovery-validity">OBSERVE</span></div>
-            <div class="orbit">
-              <div class="orbit-center"><strong>LAST<br>SAVIOR</strong><small id="last-savior-id">absent</small></div>
-              <div class="orbit-node n1">MEMORY<br>PALACE</div>
-              <div class="orbit-node n2">SHADOW<br>LAWS</div>
-              <div class="orbit-node n3">ROSETTA</div>
-              <div class="orbit-node n4">QUATERNARY</div>
-              <div class="orbit-node n5">FORWARD<br>WITNESS</div>
-              <div class="orbit-node n6">FIREWALL</div>
-            </div>
-          </article>
+        <div class="recovery-theater-grid">
           <article class="panel">
-            <div class="panel-head"><div><span class="kicker">AUTHORITY SURFACE</span><h2>Current boundaries</h2></div></div>
-            <dl class="facts">
-              <div><dt>Observatory</dt><dd>READ_ONLY_OBSERVER</dd></div>
-              <div><dt>Savior mode</dt><dd id="recovery-savior-mode">absent</dd></div>
-              <div><dt>Contract analysis</dt><dd id="recovery-contracts">absent</dd></div>
-              <div><dt>Firewall sequence</dt><dd id="recovery-firewall">0</dd></div>
-              <div><dt>Archive hash</dt><dd><code id="recovery-archive-hash">—</code></dd></div>
-            </dl>
+            <div class="panel-head"><div><span class="kicker">RECOVERY CONTRACT TOPOLOGY</span><h2>Survival constellation</h2></div><span class="tag" id="recovery-graph-summary">loading…</span></div>
+            <p class="muted">Every node comes from the live Recovery Contract registry. Color means role. Dim nodes are defined by the constitution but not present in the currently observed evidence set.</p>
+            <div id="recovery-graph" class="recovery-graph-wrap"></div>
           </article>
+          <article class="panel"><div class="panel-head"><div><span class="kicker">SELECTED SYSTEM</span><h2>Contract inspector</h2></div></div><div id="recovery-node-detail" class="recovery-node-detail"><p>Select a recovery node.</p></div></article>
         </div>
+        <article class="panel"><div class="panel-head"><div><span class="kicker">ARCHIVE SURFACE</span><h2>Current recovery facts</h2></div><span class="tag" id="recovery-validity">OBSERVE</span></div><dl class="facts"><div><dt>Last Savior</dt><dd id="last-savior-id">absent</dd></div><div><dt>Savior mode</dt><dd id="recovery-savior-mode">absent</dd></div><div><dt>Contract analysis</dt><dd id="recovery-contracts">absent</dd></div><div><dt>Firewall sequence</dt><dd id="recovery-firewall">0</dd></div><div><dt>Archive hash</dt><dd><code id="recovery-archive-hash">—</code></dd></div></dl></article>
+      </section>
+
+      <section class="view" id="view-authority">
+        <article class="panel">
+          <div class="panel-head"><div><span class="kicker">RECOVERY AUTHORITY</span><h2>Nothing promotes itself</h2></div><span class="tag">DENY BY DEFAULT</span></div>
+          <div class="authority-summary"><article><span>LEDGER DECISIONS</span><strong id="authority-ledger-count">0</strong></article><article><span>DENIALS SHOWN</span><strong id="authority-denials">0</strong></article><article><span>LEDGER HEAD</span><strong id="authority-ledger-head">—</strong></article><article><span>LATEST ACTION</span><strong id="authority-last-action">—</strong></article></div>
+          <div class="authority-ladder">
+            <div class="authority-step"><strong>RECOVERY SOURCE</strong><small>reconstruct sandbox</small></div><div class="authority-step"><strong>CANONICAL QUORUM</strong><small>identify candidate</small></div><div class="authority-step"><strong>RECOVERY JURY</strong><small>nominate only</small></div><div class="authority-step"><strong>JURY GATE</strong><small>open ceremony</small></div><div class="authority-step"><strong>3 / 5 HUMANS</strong><small>authorize intent</small></div><div class="authority-step"><strong>CERTIFICATE</strong><small>non executable</small></div><div class="authority-step stop"><strong>NO AUTO PROMOTION</strong><small>manual boundary</small></div>
+          </div>
+          <div id="authority-barrier" class="authority-barrier"></div>
+        </article>
+        <article class="panel"><div class="panel-head"><div><span class="kicker">AUTHORITY FIREWALL</span><h2>Decision ledger</h2></div><span class="tag">HASH CHAINED</span></div><div id="firewall-ledger" class="firewall-ledger"><div class="empty">No authority decisions observed.</div></div></article>
       </section>
     </main>
   </div>
   <script src="/index-lab.js" defer></script>
+  <script src="/wal-theater.js" defer></script>
+  <script src="/recovery-theater.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>
