@@ -42,23 +42,25 @@ class CryptographicCouncil {
     return round;
   }
 
-  async verify(id = null) {
-    await this.init();
+  async verify(id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const record = id ? await readJson(path.join(this.rounds, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!record) return { valid: false, status: 'ABSENT' };
+    if (!record) return { valid: false, status: 'ABSENT', readOnly };
     const [ed, hash] = await Promise.all([
-      this.ed.verifyRound(record.families?.ed25519?.roundId || null),
-      this.hash.verifyRound(record.families?.lamportSha256?.roundId || null)
+      this.ed.verifyRound(record.families?.ed25519?.roundId || null, { readOnly }),
+      this.hash.verifyRound(record.families?.lamportSha256?.roundId || null, { readOnly })
     ]);
     const roots = [ed.statement?.worldRoot, hash.statement?.worldRoot].filter(Boolean);
     const sameRoot = roots.length === 2 && roots[0] === roots[1] && roots[0] === record.worldRoot;
     const familyQuorum = Number(ed.valid) + Number(hash.valid);
     return {
-      format: 'JSONDB-CRYPTOGRAPHIC-COUNCIL-VERIFY-1',
+      format: 'JSONDB-CRYPTOGRAPHIC-COUNCIL-VERIFY-2',
       valid: familyQuorum >= 2 && sameRoot,
+      readOnly,
       worldRoot: record.worldRoot, sameRoot, familyQuorum, requiredFamilies: 2,
-      ed25519: { valid: ed.valid, validSignatures: ed.validSignatures, threshold: ed.threshold, worldRoot: ed.statement?.worldRoot },
-      lamportSha256: { valid: hash.valid, validSignatures: hash.validSignatures, threshold: hash.threshold, worldRoot: hash.statement?.worldRoot },
+      ed25519: { valid: ed.valid, status: ed.status, validSignatures: ed.validSignatures, threshold: ed.threshold, worldRoot: ed.statement?.worldRoot },
+      lamportSha256: { valid: hash.valid, status: hash.status, validSignatures: hash.validSignatures, threshold: hash.threshold, worldRoot: hash.statement?.worldRoot },
       status: familyQuorum >= 2 && sameRoot ? 'DUAL_FAMILY_TRUST' : familyQuorum >= 1 ? 'SINGLE_FAMILY_ONLY' : 'UNTRUSTED'
     };
   }
