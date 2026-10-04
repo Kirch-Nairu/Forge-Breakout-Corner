@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('path');
-const { ensureDir, readJson, atomicJson } = require('./jsonfs');
+const { ensureDir, readJson } = require('./jsonfs');
 
 class RecoveryMutationAudit {
   constructor(kernel) {
@@ -84,8 +84,8 @@ class RecoveryMutationAudit {
     const replayValid = audits.every(x => x.valid);
     const recomputedUnsafe = audits.filter(x => !x.recomputedSafe).length;
     const summaryMatches = Number(mutation.summary?.unsafe || 0) === recomputedUnsafe && Number(mutation.summary?.totalMutations || 0) === audits.length;
-    const result = {
-      format: 'JSONDB-RECOVERY-MUTATION-AUDIT-1',
+    return {
+      format: 'JSONDB-RECOVERY-MUTATION-AUDIT-2',
       mutationId: mutation.id,
       valid: mutationBase.valid === true && baselineValid && replayValid && summaryMatches && recomputedUnsafe === 0,
       mutationArtifactValid: mutationBase.valid === true,
@@ -94,10 +94,8 @@ class RecoveryMutationAudit {
       summaryMatches,
       recomputedUnsafe,
       audits,
-      doctrine: 'Recorded mutation classifications are not trusted. Every referenced Navigator plan is reopened and independently reclassified.'
+      doctrine: 'Verification is read-only. Recorded mutation classifications are not trusted; every referenced Navigator plan is reopened and independently reclassified.'
     };
-    await atomicJson(path.join(this.root, 'latest.json'), result);
-    return result;
   }
 }
 
