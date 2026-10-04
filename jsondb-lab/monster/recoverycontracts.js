@@ -5,15 +5,32 @@ const {now,ensureDir,atomicJson,readJson}=require('./jsonfs');
 function hash(v){return crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');}
 
 class RecoveryContractRegistry{
- constructor(savior){this.savior=savior;this.root=path.join(savior.root,'recovery-contracts');this.file=path.join(this.root,'registry.json');}
+ constructor(savior){
+  this.savior=savior;
+  this.root=path.join(savior.root,'recovery-contracts');
+  this.file=path.join(this.root,'registry.json');
+  this.versions=path.join(this.root,'versions');
+ }
+ async persistVersion(registry){
+  if(!registry?.registryHash)return;
+  await ensureDir(this.versions);
+  const file=path.join(this.versions,`${registry.registryHash}.json`);
+  if(!(await readJson(file,null)))await atomicJson(file,registry);
+ }
  async init(){
-  await ensureDir(this.root);
+  await ensureDir(this.root);await ensureDir(this.versions);
   let r=await readJson(this.file,null);
   if(!r||r.format!=='JSONDB-RECOVERY-CONTRACTS-5'){
-   if(r)await atomicJson(path.join(this.root,`registry-archive-${Date.now()}.json`),r);
+   if(r){await this.persistVersion(r);await atomicJson(path.join(this.root,`registry-archive-${Date.now()}.json`),r);}
    r=this.build();await atomicJson(this.file,r);
   }
+  await this.persistVersion(r);
   return r;
+ }
+ async version(registryHash){
+  if(!registryHash)return null;
+  await ensureDir(this.versions);
+  return readJson(path.join(this.versions,`${registryHash}.json`),null);
  }
  contract(id,kind,reconstructs,corroborates,dependencies,extra={}){return{id,kind,reconstructs,corroborates,dependencies,mayAutoRepair:extra.mayAutoRepair||[],mayNominate:Boolean(extra.mayNominate),mayAuthorize:Boolean(extra.mayAuthorize),mayPromoteCanonical:false,forbidden:[...(extra.forbidden||[]),'silent-canonical-promotion'],notes:extra.notes||[]};}
  build(){
@@ -48,7 +65,11 @@ class RecoveryContractRegistry{
   c.push(this.contract('last-savior','orchestrator',[],['cross-family-consistency'],['federation','rosetta-capsule','quaternary-cold-codec','shadow-laws','forward-witness','recovery-contracts'],{forbidden:['treat-own-receipt-as-sole-proof']}));
   const registry={format:'JSONDB-RECOVERY-CONTRACTS-5',createdAt:now(),contracts:Object.fromEntries(c.map(x=>[x.id,x])),globalDoctrine:['No subsystem may promote canonical state automatically.','Reconstructive and corroborative functions should remain separable.','Authority evidence does not reconstruct bytes.','Transport redundancy is not semantic truth.','Interpretation metadata is not recovery authority.','Planning does not imply execution authority.','Policy enforcement is deny-by-default and may not grant authority absent from the registry.','Policy checkpoints may attest policy history but never create new policy authority.','Proof-carrying plans may preserve planning evidence but never upgrade that evidence into execution authority.','Mutation tests must accept only verified reroute or verified hard block under evidence loss.']};registry.registryHash=hash(registry);return registry;
  }
- async reset(){const old=await readJson(this.file,null);if(old)await atomicJson(path.join(this.root,`registry-reset-archive-${Date.now()}.json`),old);const r=this.build();await atomicJson(this.file,r);return r;}
+ async reset(){
+  const old=await readJson(this.file,null);
+  if(old){await this.persistVersion(old);await atomicJson(path.join(this.root,`registry-reset-archive-${Date.now()}.json`),old);}
+  const r=this.build();await atomicJson(this.file,r);await this.persistVersion(r);return r;
+ }
  async analyze(){
   const r=await this.init(),contracts=Object.values(r.contracts||{}),violations=[],warnings=[];
   for(const c of contracts){
