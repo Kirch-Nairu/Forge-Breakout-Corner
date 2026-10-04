@@ -103,6 +103,9 @@ jobs:
           });
           NODE
 
+      - name: Verify live Last Savior under forensic write barrier
+        run: node jsondb-lab/recovery-selftest.js --live-last-savior
+
       - name: Build representative policy and planning artifacts
         shell: bash
         run: |
