@@ -152,6 +152,68 @@ jobs:
           });
           NODE
 
+      - name: Evolve Recovery Contracts and verify historical policy drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const path = require('path');
+          const { FederatedOmegaKernel } = require('./jsondb-lab/monster/federated-kernel');
+
+          async function main() {
+            const kernel = new FederatedOmegaKernel(path.join(process.cwd(), 'jsondb-lab'));
+            const before = await kernel.recoveryContracts.inspect();
+            if (!before.valid || !before.registryHash) throw new Error('Pre-drift Recovery Contract registry is not valid.');
+
+            const next = await kernel.recoveryContracts.reset();
+            if (!next?.registryHash || next.registryHash === before.registryHash) {
+              throw new Error('Recovery Contract evolution did not produce a distinct registry hash.');
+            }
+
+            const [archive, checkpoint, proof, navigator, mutation, mutationAudit, firewall] = await Promise.all([
+              kernel.lastSavior.verify(null, { live: false, readOnly: true }),
+              kernel.policyCheckpoint.verify(null, { readOnly: true }),
+              kernel.proofPlan.verify(null, { readOnly: true }),
+              kernel.recoveryNavigator.verify(null, { readOnly: true }),
+              kernel.planMutation.verify(null, { readOnly: true }),
+              kernel.mutationAudit.verify(null, { readOnly: true }),
+              kernel.authorityFirewall.verifyLedger({ readOnly: true })
+            ]);
+
+            const assertions = {
+              archiveValid: archive.valid === true,
+              archiveDriftReported: archive.policyDriftedSinceArchive === true,
+              checkpointValid: checkpoint.valid === true,
+              checkpointDriftReported: checkpoint.policyDriftedSinceCheckpoint === true,
+              proofValid: proof.valid === true,
+              proofDriftReported: proof.policyDriftedSinceDossier === true,
+              navigatorValid: navigator.valid === true,
+              navigatorDriftReported: navigator.policyDriftedSincePlan === true,
+              mutationValid: mutation.valid === true,
+              mutationAuditValid: mutationAudit.valid === true,
+              firewallHistoryValid: firewall.valid === true
+            };
+
+            process.stdout.write(`${JSON.stringify({
+              oldRegistryHash: before.registryHash,
+              newRegistryHash: next.registryHash,
+              assertions,
+              archive: { id: archive.id, drift: archive.policyDriftedSinceArchive },
+              checkpoint: { id: checkpoint.id, drift: checkpoint.policyDriftedSinceCheckpoint },
+              proof: { id: proof.id, drift: proof.policyDriftedSinceDossier },
+              navigator: { id: navigator.id, drift: navigator.policyDriftedSincePlan }
+            }, null, 2)}\n`);
+
+            const failed = Object.entries(assertions).filter(([, ok]) => !ok).map(([name]) => name);
+            if (failed.length) throw new Error(`Historical policy drift assertions failed: ${failed.join(', ')}`);
+          }
+
+          main().catch(error => {
+            console.error(error.stack || error);
+            process.exitCode = 1;
+          });
+          NODE
+
       - name: Verify forensic read-only recovery state
         if: always()
         run: node jsondb-lab/recovery-selftest.js
