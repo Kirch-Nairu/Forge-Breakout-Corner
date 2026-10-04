@@ -80,7 +80,6 @@ class ForwardWitnessRatchet {
     await atomicJson(path.join(this.records,`${String(sequence).padStart(10,'0')}.json`),record);
     await atomicJson(path.join(this.root,'latest.json'),record);
 
-    // Ratchet forward: old current private key is intentionally not copied into new state.
     const promoted={...state.next};
     const future=this.generateKey(sequence+2);
     state={
@@ -107,10 +106,21 @@ class ForwardWitnessRatchet {
     return{valid:failures.length===0,sequence:record?.statement?.sequence,subjectHash:record?.statement?.subjectHash,nextKeyFingerprint:record?.statement?.nextKeyFingerprint,attestationHash:record?.attestationHash,failures};
   }
 
-  async verifyAll() {
-    await this.init();
+  async verifyAll(options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const genesis=await readJson(path.join(this.root,'genesis.json'),null);
     const names=(await require('fs/promises').readdir(this.records).catch(()=>[])).filter(x=>x.endsWith('.json')).sort();
+    const state=await readJson(this.stateFile,null);
+    if(!genesis&&names.length===0&&!state)return{
+      format:'JSONDB-FORWARD-WITNESS-VERIFY-2',valid:false,status:'ABSENT',readOnly,records:0,results:[],genesisValid:false,activeStateValid:null,headHash:null
+    };
+
+    const genesisValid=Boolean(
+      genesis?.firstKeyFingerprint &&
+      genesis?.firstPublicKeyPem &&
+      fingerprint(genesis.firstPublicKeyPem)===genesis.firstKeyFingerprint
+    );
     let previous=null;
     let expectedKey=genesis?.firstKeyFingerprint||null;
     const results=[];
@@ -125,12 +135,25 @@ class ForwardWitnessRatchet {
       expectedKey=record?.statement?.nextKeyFingerprint||null;
       expectedSequence++;
     }
+    const chainValid=genesisValid&&results.every(x=>x.valid);
+    const activeStateValid=state?Boolean(
+      Number(state.sequence||0)===results.length&&
+      (state.lastAttestationHash||null)===(previous||null)&&
+      (!expectedKey||state.current?.fingerprint===expectedKey)
+    ):null;
     return{
-      format:'JSONDB-FORWARD-WITNESS-VERIFY-1',
-      valid:results.every(x=>x.valid),records:results.length,results,
+      format:'JSONDB-FORWARD-WITNESS-VERIFY-2',
+      valid:chainValid,
+      status:chainValid?(results.length?'CHAIN_VALID':'GENESIS_ONLY'):'CHAIN_INVALID',
+      readOnly,
+      records:results.length,results,
+      genesisValid,
       genesisFingerprint:genesis?.firstKeyFingerprint||null,
       headHash:previous,
-      caveat:'Forward security depends on historical private keys truly becoming unavailable. Ordinary filesystem overwrite/deletion does not prove secure erase.'
+      activeStatePresent:Boolean(state),
+      activeStateValid,
+      currentStateSequence:state?.sequence??null,
+      caveat:'Historical chain validity is anchored in genesis and does not depend on surviving active private-key state. Active-state health is reported separately. Ordinary filesystem overwrite/deletion does not prove secure erase.'
     };
   }
 }
