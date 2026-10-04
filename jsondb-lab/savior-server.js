@@ -23,6 +23,8 @@ const { MetamorphicVerifier } = require('./monster/metamorphic');
 const { CrossHistoryBraid } = require('./monster/braid');
 const { SurvivalOracle } = require('./monster/oracle');
 const { SurvivalFabric } = require('./monster/fabric');
+const { FailureDomainTrustBudget } = require('./monster/trustbudget');
+const { ChallengeScrubber } = require('./monster/challenge');
 const { readJson, readJsonl } = require('./monster/jsonfs');
 
 const ROOT = __dirname;
@@ -45,10 +47,12 @@ const genome = new SurvivorGenome({ engine, savior, orthogonal, council });
 const fractal = new FractalQuorum(savior);
 const metamorphic = new MetamorphicVerifier(engine, savior);
 const braid = new CrossHistoryBraid({ savior, guardian, chronicle, council, truth, immune, orthogonal, trinity });
+const trustBudget = new FailureDomainTrustBudget();
+const challenge = new ChallengeScrubber({ savior, braid });
 const oracle = new SurvivalOracle({ savior, guardian, truth, orthogonal, council, immune, chronicle, braid, trinity, genome });
 const fabric = new SurvivalFabric({
   engine, savior, guardian, truth, council, immune, orthogonal, trinity,
-  genome, fractal, metamorphic, chronicle, braid, oracle
+  genome, fractal, metamorphic, chronicle, braid, oracle, trustBudget, challenge
 });
 
 function json(res, status, payload) {
@@ -84,6 +88,8 @@ async function status() {
     savior: await savior.status(),
     fabric: fabricStatus.summary || fabricStatus,
     oracle: fabricStatus.oracle ? { verdict: fabricStatus.oracle.verdict, confidence: fabricStatus.oracle.confidence, contradictions: fabricStatus.oracle.contradictions } : null,
+    trustBudget: fabricStatus.trustBudget || null,
+    challengeCoverage: fabricStatus.challengeCoverage || null,
     witnessChain: await guardian.verifyChain(),
     mirrorWorld: await guardian.worldVerdict().catch(error => ({ healthy: false, error: error.message })),
     semanticChronicle: await chronicle.verify().catch(error => ({ valid: false, error: error.message })),
@@ -109,11 +115,8 @@ async function safeTransact(spec = {}) {
   const result = await engine.transact(ops, { isolation: spec.isolation });
 
   let chronicleEntry;
-  try {
-    chronicleEntry = await chronicle.commit(chroniclePrepare, ops, result, { survivalLevel });
-  } catch (error) {
-    return committedButSurvivalFailed(result, 'semantic-chronicle-append', error);
-  }
+  try { chronicleEntry = await chronicle.commit(chroniclePrepare, ops, result, { survivalLevel }); }
+  catch (error) { return committedButSurvivalFailed(result, 'semantic-chronicle-append', error); }
 
   let mirror;
   try { mirror = await savior.captureMirrors(); }
@@ -140,7 +143,8 @@ async function safeTransact(spec = {}) {
   if (survivalLevel === 'ULTIMATE') {
     try {
       fabricSeal = await fabric.seal(`tx-${result.tx}`, {
-        level: 'ULTIMATE', trinity: true, genome: true, verifyArchives: false
+        level: 'ULTIMATE', trinity: true, genome: true, challenge: true,
+        verifyArchives: false, enforceTrustBudget: true
       });
     } catch (error) {
       return committedButSurvivalFailed(result, 'ultimate-fabric-seal', error);
@@ -185,11 +189,12 @@ async function panic(reason = 'operator initiated panic') {
   const temporal = await guardian.witnessRound('panic-capsule');
   const signed = await council.round(temporal.worldRoot, { panic: true, reason, temporalRoundHash: temporal.roundHash });
   const braidEpoch = await braid.weave('panic-capsule').catch(error => ({ error: error.message }));
+  const challengeRound = await challenge.challenge({ perFile: 16, freezeOnFailure: false }).catch(error => ({ error: error.message }));
   const state = await savior.setMode('panic', reason);
   return {
     state, capsule, orthogonal: dualCode, trinity: trinityArchive, genome: genomeArchive,
     witness: temporal.roundHash, signedWitness: { valid: signed.valid, validSignatures: signed.validSignatures, threshold: signed.threshold },
-    braid: braidEpoch
+    braid: braidEpoch, challenge: challengeRound
   };
 }
 
@@ -200,14 +205,16 @@ async function api(req, res, url) {
   if (p === '/api/savior/journal' && req.method === 'GET') return json(res, 200, { events: (await readJsonl(savior.journal)).slice(-Math.min(500, Number(url.searchParams.get('limit') || 100))) });
 
   if (p === '/api/savior/fabric/status' && req.method === 'GET') return json(res, 200, await fabric.status({ deep: url.searchParams.get('deep') === '1' }));
-  if (p === '/api/savior/fabric/seal' && req.method === 'POST') {
-    const b = await body(req); return json(res, 201, await fabric.seal(b.label || 'operator-seal', b));
-  }
+  if (p === '/api/savior/fabric/seal' && req.method === 'POST') { const b = await body(req); return json(res, 201, await fabric.seal(b.label || 'operator-seal', b)); }
   if (p === '/api/savior/fabric/recovery-case' && req.method === 'POST') return json(res, 200, await fabric.recoveryCase(await body(req)));
   if (p === '/api/savior/fabric/emergency-seal' && req.method === 'POST') return json(res, 200, await fabric.emergencySeal((await body(req)).reason || 'operator emergency seal'));
 
   if (p === '/api/savior/oracle/assess' && req.method === 'POST') return json(res, 200, await oracle.assess(await body(req)));
   if (p === '/api/savior/oracle/enforce' && req.method === 'POST') return json(res, 200, await oracle.enforce(await body(req)));
+  if (p === '/api/savior/trust-budget' && req.method === 'POST') return json(res, 200, trustBudget.evaluate(await oracle.assess(await body(req))));
+
+  if (p === '/api/savior/challenge' && req.method === 'POST') return json(res, 200, await challenge.challenge(await body(req)));
+  if (p === '/api/savior/challenge/coverage' && req.method === 'GET') return json(res, 200, await challenge.coverage());
 
   if (p === '/api/savior/chronicle' && req.method === 'GET') return json(res, 200, await chronicle.verify());
   if (p === '/api/savior/chronicle/reset' && req.method === 'POST') return json(res, 201, await chronicle.resetGenesis((await body(req)).reason || 'operator reset'));
@@ -236,8 +243,7 @@ async function api(req, res, url) {
   if (p === '/api/savior/mirrors/capture' && req.method === 'POST') return json(res, 201, await savior.captureMirrors());
   if (p === '/api/savior/mirrors/scrub' && req.method === 'POST') return json(res, 200, await savior.mirrors.scrub());
   if (p === '/api/savior/temporal/repair' && req.method === 'POST') {
-    const b = await body(req);
-    return json(res, 200, await guardian.repairFromTemporalVerdict(String(b.path || ''), b.options || {}));
+    const b = await body(req); return json(res, 200, await guardian.repairFromTemporalVerdict(String(b.path || ''), b.options || {}));
   }
   if (p === '/api/savior/fractal' && req.method === 'POST') return json(res, 200, await fractal.reconstruct(String((await body(req)).path || 'current/tasks.json')));
 
@@ -251,9 +257,7 @@ async function api(req, res, url) {
   }
 
   if (p === '/api/savior/trinity/archive' && req.method === 'POST') return json(res, 201, await trinity.archive((await body(req)).label || 'manual'));
-  if (p === '/api/savior/trinity/verify' && req.method === 'POST') {
-    const result = await trinity.verify((await body(req)).id || null); delete result._buffers; return json(res, 200, result);
-  }
+  if (p === '/api/savior/trinity/verify' && req.method === 'POST') { const result = await trinity.verify((await body(req)).id || null); delete result._buffers; return json(res, 200, result); }
   if (p === '/api/savior/trinity/restore' && req.method === 'POST') {
     const b = await body(req);
     const target = path.join(savior.root, 'restore-sandboxes', String(b.file || `trinity-${Date.now()}.json`).replace(/[^A-Za-z0-9_.-]/g, '_'));
@@ -271,9 +275,7 @@ async function api(req, res, url) {
   if (p === '/api/savior/catalog/rebuild-sandbox' && req.method === 'POST') return json(res, 201, await savior.rebuildCatalogFromWorld());
   if (p === '/api/savior/canary' && req.method === 'POST') return json(res, 200, await savior.canary());
 
-  if (p === '/api/savior/mode' && req.method === 'POST') {
-    const b = await body(req); return json(res, 200, await savior.setMode(b.mode, b.reason));
-  }
+  if (p === '/api/savior/mode' && req.method === 'POST') { const b = await body(req); return json(res, 200, await savior.setMode(b.mode, b.reason)); }
   if (p === '/api/savior/panic' && req.method === 'POST') return json(res, 200, await panic((await body(req)).reason));
 
   if (p === '/api/savior/tx' && req.method === 'POST') return json(res, 200, await safeTransact(await body(req)));
@@ -289,9 +291,7 @@ async function api(req, res, url) {
       survivalLevel: spec.survivalLevel || 'ULTIMATE', verifyQueries: spec.verifyQueries
     });
     return json(res, 200, {
-      ...rehearsal,
-      collapsed: true,
-      dryRun: false,
+      ...rehearsal, collapsed: true, dryRun: false,
       collapse: {
         at: new Date().toISOString(), protectedCommit,
         winnerWorldHash: rehearsal.winner.worldHash,
@@ -342,6 +342,7 @@ async function bootstrapGenesis() {
   await trinity.archive('genesis');
   await genome.create('genesis');
   await braid.weave('genesis');
+  await challenge.challenge({ perFile: 4, freezeOnFailure: false }).catch(() => {});
 }
 
 async function main() {
@@ -374,6 +375,8 @@ async function main() {
     console.log(`Control plane : http://${HOST}:${PORT}`);
     console.log('Fabric        : coordinated epoch seals + recovery dossiers');
     console.log('Oracle        : cross-domain trust adjudication');
+    console.log('Trust budget  : discounts correlated evidence by failure domain');
+    console.log('Challenge     : braid-seeded latent-rot sampling');
     console.log('Guardian      : quorum + temporal witnesses + circuit breaker');
     console.log('Chronicle     : independent semantic commit replay');
     console.log('Braid         : cross-anchored independent history heads');
