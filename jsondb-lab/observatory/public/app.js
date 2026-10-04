@@ -12,6 +12,7 @@ const titles = {
   flow: 'Live Flow',
   wal: 'WAL Theater',
   data: 'Data Topology',
+  index: 'Index & Sorting Lab',
   recovery: 'Recovery Constellation'
 };
 
@@ -183,6 +184,7 @@ async function loadSnapshot() {
     const snapshot = await response.json();
     state.snapshot = snapshot;
     renderSnapshot(snapshot);
+    document.dispatchEvent(new CustomEvent('observatory:snapshot', { detail: snapshot }));
     connection('online', 'OBSERVING');
   } catch (error) {
     connection('offline', 'SNAPSHOT ERROR');
@@ -332,6 +334,7 @@ function addActivity(event) {
 function handleEvent(event) {
   addActivity(event);
   state.visualizers.forEach(v => v.emit(event));
+  document.dispatchEvent(new CustomEvent('observatory:event', { detail: event }));
   clearTimeout(handleEvent.refreshTimer);
   handleEvent.refreshTimer = setTimeout(loadSnapshot, 220);
 }
@@ -349,7 +352,16 @@ function connectEvents() {
   source.onopen = () => connection('online', 'LIVE STREAM');
 }
 
+function attachIndexLabStyles() {
+  if (document.querySelector('link[href="/index-lab.css"]')) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = '/index-lab.css';
+  document.head.appendChild(link);
+}
+
 function init() {
+  attachIndexLabStyles();
   setupNavigation();
   state.visualizers.push(new FlowVisualizer('overview-flow-stage', 'overview-flow-canvas'));
   state.visualizers.push(new FlowVisualizer('flow-stage', 'flow-canvas'));
