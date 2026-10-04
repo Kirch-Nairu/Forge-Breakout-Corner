@@ -29,6 +29,17 @@ async function sha256File(file) {
   return crypto.createHash('sha256').update(body).digest('hex');
 }
 
+function statEvidence(stat) {
+  return {
+    mode: stat.mode,
+    ino: Number(stat.ino || 0),
+    dev: Number(stat.dev || 0),
+    nlink: Number(stat.nlink || 0),
+    mtimeMs: stat.mtimeMs,
+    ctimeMs: stat.ctimeMs
+  };
+}
+
 async function snapshotTree(root) {
   const rows = [];
   const walk = async (target, rel = '.') => {
@@ -38,22 +49,23 @@ async function snapshotTree(root) {
       if (error.code === 'ENOENT') return;
       throw error;
     }
+    const metadata = statEvidence(stat);
     if (stat.isDirectory()) {
-      rows.push({ path: rel, type: 'dir' });
+      rows.push({ path: rel, type: 'dir', ...metadata });
       const entries = await fsp.readdir(target, { withFileTypes: true });
       entries.sort((a, b) => a.name.localeCompare(b.name));
       for (const entry of entries) await walk(path.join(target, entry.name), path.join(rel, entry.name));
       return;
     }
     if (stat.isFile()) {
-      rows.push({ path: rel, type: 'file', size: stat.size, sha256: await sha256File(target) });
+      rows.push({ path: rel, type: 'file', size: stat.size, sha256: await sha256File(target), ...metadata });
       return;
     }
     if (stat.isSymbolicLink()) {
-      rows.push({ path: rel, type: 'symlink', target: await fsp.readlink(target) });
+      rows.push({ path: rel, type: 'symlink', target: await fsp.readlink(target), ...metadata });
       return;
     }
-    rows.push({ path: rel, type: 'other', mode: stat.mode });
+    rows.push({ path: rel, type: 'other', ...metadata });
   };
   await walk(root);
   return rows;
@@ -79,6 +91,11 @@ function sameSnapshot(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function changedSurfaces(before, after) {
+  const names = new Set([...Object.keys(before || {}), ...Object.keys(after || {})]);
+  return [...names].filter(name => JSON.stringify(before?.[name] || []) !== JSON.stringify(after?.[name] || []));
+}
+
 async function main() {
   const readOnly = !bootstrap;
   const before = readOnly ? await snapshotPolicySurface() : null;
@@ -99,6 +116,7 @@ async function main() {
 
   const after = readOnly ? await snapshotPolicySurface() : null;
   const policySurfaceUnchanged = readOnly ? sameSnapshot(before, after) : null;
+  const mutatedSurfaces = readOnly ? changedSurfaces(before, after) : [];
   if (readOnly) {
     checks.push({
       name: 'forensic-policy-surface-unchanged',
@@ -107,19 +125,19 @@ async function main() {
       value: {
         valid: policySurfaceUnchanged,
         status: policySurfaceUnchanged ? 'UNCHANGED' : 'MUTATED',
-        before,
-        after
+        mutatedSurfaces
       }
     });
   }
 
   const presentFailures = checks.filter(x => !x.ok);
   const report = {
-    format: 'JSONDB-RECOVERY-SELFTEST-2',
+    format: 'JSONDB-RECOVERY-SELFTEST-3',
     mode: bootstrap ? 'BOOTSTRAP_AND_VERIFY' : 'FORENSIC_READ_ONLY',
     readOnly,
     ok: presentFailures.length === 0,
     policySurfaceUnchanged,
+    mutatedSurfaces,
     checks: checks.map(x => ({
       name: x.name,
       ok: x.ok,
@@ -131,7 +149,7 @@ async function main() {
     failures: presentFailures.map(x => x.name),
     doctrine: bootstrap
       ? 'Bootstrap mode may initialize and migrate recovery metadata before verification.'
-      : 'Forensic mode does not initialize the federated kernel and fails if the policy/recovery evidence surface changes during verification. ABSENT optional artifacts do not fail the self-test; any present artifact that verifies false does.'
+      : 'Forensic mode does not initialize the federated kernel. It compares hashes plus inode/device/link/mode/mtime/ctime metadata and fails if the policy/recovery evidence surface changes during verification. Access time is intentionally excluded. ABSENT optional artifacts do not fail the self-test; any present artifact that verifies false does.'
   };
 
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
