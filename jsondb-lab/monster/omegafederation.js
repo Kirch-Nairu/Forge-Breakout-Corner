@@ -77,15 +77,16 @@ class OmegaFederation {
   }
 
   async verify(id = null, options = {}) {
-    await this.init();
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const receipt = id ? await readJson(path.join(this.receipts, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!receipt) return { valid: false, status: 'ABSENT' };
+    if (!receipt) return { valid: false, status: 'ABSENT', readOnly };
     const copy = { ...receipt }; delete copy.federationHash; delete copy.polyhash;
     const computed = digest(copy);
-    const epoch = await this.epochSealer.verify(receipt.omegaEpoch.id, { live: options.live === true }).catch(error => ({ valid: false, error: error.message }));
-    const weave = await this.timeWeave.verifyNode(receipt.omegaEpoch.id).catch(error => ({ valid: false, error: error.message }));
-    const parity = receipt.temporalParity?.id ? await this.temporalParity.inspect(receipt.temporalParity.id).catch(error => ({ damaged: Infinity, error: error.message })) : null;
-    const court = receipt.historyCourt?.id ? await this.historyCourt.verify(receipt.historyCourt.id).catch(error => ({ valid: false, error: error.message })) : null;
+    const epoch = await this.epochSealer.verify(receipt.omegaEpoch.id, { live: options.live === true, readOnly }).catch(error => ({ valid: false, error: error.message }));
+    const weave = await this.timeWeave.verifyNode(receipt.omegaEpoch.id, { readOnly }).catch(error => ({ valid: false, error: error.message }));
+    const parity = receipt.temporalParity?.id ? await this.temporalParity.inspect(receipt.temporalParity.id, { readOnly }).catch(error => ({ damaged: Infinity, error: error.message })) : null;
+    const court = receipt.historyCourt?.id ? await this.historyCourt.verify(receipt.historyCourt.id, { readOnly }).catch(error => ({ valid: false, error: error.message })) : null;
     let hologram = null;
     if (receipt.semanticHologram?.id && this.hologram) {
       const record = await readJson(path.join(this.hologram.records, `${receipt.semanticHologram.id}.json`), null);
@@ -96,12 +97,13 @@ class OmegaFederation {
       };
     }
     let polyhash = null;
-    if (this.polyhash && receipt.polyhash) polyhash = await this.polyhash.verify({ ...copy, federationHash: receipt.federationHash }, receipt.polyhash);
+    if (this.polyhash && receipt.polyhash) polyhash = await this.polyhash.verify({ ...copy, federationHash: receipt.federationHash }, receipt.polyhash, { readOnly });
     const parityHealthy = !parity || Number(parity.damaged || 0) <= 2;
     const hologramHealthy = !receipt.semanticHologram || (hologram?.present && hologram?.hashMatchesReceipt);
     return {
-      format: 'JSONDB-OMEGA-FEDERATION-VERIFY-2', id: receipt.id,
+      format: 'JSONDB-OMEGA-FEDERATION-VERIFY-3', id: receipt.id,
       valid: computed === receipt.federationHash && epoch.valid === true && weave.valid === true && parityHealthy && hologramHealthy && (!court || court.valid === true) && (!polyhash || polyhash.valid),
+      readOnly,
       staticValid: computed === receipt.federationHash,
       expectedFederationHash: receipt.federationHash, computedFederationHash: computed,
       epoch, weave, temporalParity: parity ? { damaged: parity.damaged, recoverable: Number(parity.damaged || 0) <= 2, error: parity.error } : null,
