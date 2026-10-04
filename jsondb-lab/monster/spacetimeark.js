@@ -81,21 +81,36 @@ class SpacetimeArk {
     return manifest;
   }
 
-  async load(id=null){await this.init();if(!id)id=(await readJson(path.join(this.root,'latest.json'),null))?.id;if(!id)throw new Error('No Spacetime ARK generation.');const dir=path.join(this.generations,id),manifest=await readJson(path.join(dir,'manifest.json'),null);if(!manifest)throw new Error(`Spacetime ARK generation not found: ${id}`);return{dir,manifest};}
+  async load(id=null,options={}){
+    const readOnly=options.readOnly===true;
+    if(!readOnly)await this.init();
+    if(!id)id=(await readJson(path.join(this.root,'latest.json'),null))?.id;
+    if(!id){const error=new Error('No Spacetime ARK generation.');error.code='SPACETIME_ARK_ABSENT';throw error;}
+    const dir=path.join(this.generations,id),manifest=await readJson(path.join(dir,'manifest.json'),null);
+    if(!manifest)throw new Error(`Spacetime ARK generation not found: ${id}`);
+    return{dir,manifest,readOnly};
+  }
 
   async readCell(file,spec){const doc=await readJson(file,null);if(!doc?.base64)throw new Error('missing cell payload');const buf=Buffer.from(doc.base64,'base64');if(sha(buf)!==spec.sha256)throw new Error('cell checksum mismatch');return buf;}
 
-  async inspect(id=null,sourceDir=null){
-    const {dir,manifest}=await this.load(id);const base=sourceDir||dir;
+  async inspect(id=null,sourceDir=null,options={}){
+    const readOnly=options.readOnly===true;
+    let loaded;
+    try{loaded=await this.load(id,{readOnly});}
+    catch(error){if(readOnly&&error.code==='SPACETIME_ARK_ABSENT')return{status:'ABSENT',valid:false,readOnly,manifest:null,states:[],erasures:0};throw error;}
+    const {dir,manifest}=loaded;const base=sourceDir||dir;
     const grid=Array.from({length:manifest.geometry.totalRows},()=>Array(manifest.geometry.totalColumns).fill(null));const states=[];
     for(const spec of manifest.cells){try{const buf=await this.readCell(path.join(base,spec.file),spec);grid[spec.row][spec.column]=buf;states.push({...spec,state:'GOOD'});}catch(error){states.push({...spec,state:'ERASED',error:error.message});}}
-    return{manifest,base,grid,states,erasures:states.filter(x=>x.state!=='GOOD').length};
+    return{status:'PRESENT',valid:true,readOnly,manifest,base,grid,states,erasures:states.filter(x=>x.state!=='GOOD').length};
   }
 
   solveLine(values,missingIndex,shardSize){const recovered=Buffer.alloc(shardSize);for(let i=0;i<values.length;i++){if(i===missingIndex||!values[i])continue;xorInto(recovered,values[i]);}return recovered;}
 
   async recover(id=null,options={}){
-    const inspection=await this.inspect(id,options.sourceDir||null);const {manifest,grid}=inspection;const R=manifest.geometry.totalRows,C=manifest.geometry.totalColumns,shardSize=manifest.geometry.shardSize;
+    const readOnly=options.readOnly===true;
+    const inspection=await this.inspect(id,options.sourceDir||null,{readOnly});
+    if(inspection.status==='ABSENT')return{format:'JSONDB-SPACETIME-RECOVERY-2',status:'ABSENT',valid:false,readOnly,generation:null,epochs:[],recoveredCells:[],unresolved:[]};
+    const {manifest,grid}=inspection;const R=manifest.geometry.totalRows,C=manifest.geometry.totalColumns,shardSize=manifest.geometry.shardSize;
     const recoveredCells=[];let progress=true,rounds=0;
     while(progress){progress=false;rounds++;
       for(let r=0;r<R;r++){
@@ -109,19 +124,20 @@ class SpacetimeArk {
       if(rounds>R*C+2)break;
     }
     const unresolved=[];for(let r=0;r<R;r++)for(let c=0;c<C;c++)if(!grid[r][c])unresolved.push({row:r,column:c});
-    const epochResults=[];const sandbox=path.join(this.root,'recovered',manifest.id);await ensureDir(sandbox);
+    const epochResults=[];const sandbox=readOnly?null:path.join(this.root,'recovered',manifest.id);
+    if(!readOnly)await ensureDir(sandbox);
     for(const epoch of manifest.epochs){
       const data=[];let complete=true;for(let c=0;c<manifest.geometry.dataColumns;c++){if(!grid[epoch.row][c]){complete=false;break;}data.push(grid[epoch.row][c]);}
       if(!complete){epochResults.push({file:epoch.file,status:'UNRESOLVED'});continue;}
       const bytes=Buffer.concat(data).subarray(0,epoch.bytes);const actual=sha(bytes);const valid=actual===epoch.sha256;
-      const target=path.join(sandbox,epoch.file);if(valid)await fsp.writeFile(target,bytes);
+      const target=readOnly?null:path.join(sandbox,epoch.file);if(valid&&!readOnly)await fsp.writeFile(target,bytes);
       epochResults.push({file:epoch.file,status:valid?'RECOVERED':'HASH_MISMATCH',target:valid?target:null,expected:epoch.sha256,actual});
     }
+    const status=unresolved.length?'PARTIAL':epochResults.every(x=>x.status==='RECOVERED')?'RECOVERED':'FAILED';
     return{
-      format:'JSONDB-SPACETIME-RECOVERY-1',generation:manifest.id,
-      status:unresolved.length?'PARTIAL':epochResults.every(x=>x.status==='RECOVERED')?'RECOVERED':'FAILED',
+      format:'JSONDB-SPACETIME-RECOVERY-2',generation:manifest.id,status,valid:['RECOVERED','PARTIAL'].includes(status),readOnly,
       originalErasures:inspection.erasures,recoveredCells,unresolved,rounds,epochs:epochResults,sandbox,
-      doctrine:'Recovered epochs are written to a sandbox. Spacetime ARK does not promote or overwrite canonical history.'
+      doctrine:readOnly?'Forensic recovery proves reconstructability in memory and writes no sandbox artifacts.':'Recovered epochs are written to a sandbox. Spacetime ARK does not promote or overwrite canonical history.'
     };
   }
 
@@ -131,14 +147,12 @@ class SpacetimeArk {
     const placements=[];const copies=Math.max(1,Math.min(media.length,Number(options.copiesPerCell||1)));
     for(const spec of manifest.cells){
       for(let copy=0;copy<copies;copy++){
-        // Column-major placement keeps adjacent spatial shards on different media when possible; row offset rotates temporal epochs.
         const medium=media[(spec.column+spec.row+copy)%media.length];
         const targetDir=path.join(medium.root,'JSONDB-SURVIVAL','spacetime-ark',manifest.id);await ensureDir(targetDir);
         const source=path.join(dir,spec.file),target=path.join(targetDir,spec.file);await fsp.copyFile(source,target);
         placements.push({row:spec.row,column:spec.column,file:spec.file,copy:copy+1,media:medium.name,deviceKey:medium.inspection?.deviceKey||null,target,sha256:await hashFile(target)});
       }
     }
-    // Every medium also receives the small manifest; this metadata is not counted as an independent data shard.
     for(const medium of media){const targetDir=path.join(medium.root,'JSONDB-SURVIVAL','spacetime-ark',manifest.id);await ensureDir(targetDir);await fsp.copyFile(path.join(dir,'manifest.json'),path.join(targetDir,'manifest.json'));}
     const receipt={format:'JSONDB-SPACETIME-PLACEMENT-1',id:`${Date.now()}-${manifest.id}`,at:now(),generation:manifest.id,copiesPerCell:copies,registeredMedia:media.length,distinctDeviceKeys:new Set(placements.map(x=>x.deviceKey).filter(Boolean)).size,placements,warning:'Rotating placement improves apparent failure-domain spread but deviceKey does not prove independent controller, power, site, or operator domains.'};
     await atomicJson(path.join(this.placements,`${receipt.id}.json`),receipt);await atomicJson(path.join(this.root,'latest-placement.json'),receipt);return receipt;
