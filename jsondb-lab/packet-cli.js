@@ -1,0 +1,9 @@
+#!/usr/bin/env node
+'use strict';
+
+const path=require('path');const fsp=require('fs/promises');
+const {MonsterEngine}=require('./monster/engine');const {SaviorSystem}=require('./monster/savior');const {OrthogonalArk}=require('./monster/orthogonal');const {SelfDescribingPacketArk}=require('./monster/packets');
+const engine=new MonsterEngine(__dirname);const savior=new SaviorSystem(engine,{cells:5});const orthogonal=new OrthogonalArk(engine,savior);const packetRoot=path.join(savior.root,'airgap-packets');const packets=new SelfDescribingPacketArk(packetRoot,6,3);
+async function boot(){await engine.init();await savior.init();await orthogonal.init();await packets.init()}function out(v){console.log(JSON.stringify(v,null,2))}function usage(){console.log(`JSONDB AIR-GAP PACKETS\n\n  create [label]\n  scan [directory]\n  recover <output-file> [set-id] [directory]\n`)}
+async function main(){await boot();const[cmd,...args]=process.argv.slice(2);if(!cmd)return usage();if(cmd==='create'){const payload=await orthogonal.worldPayload(args[0]||'airgap');const result=await packets.create(`world:${args[0]||'airgap'}`,Buffer.from(JSON.stringify(payload)),{saviorMode:(await savior.status()).mode});return out(result)}if(cmd==='scan'){const dir=path.resolve(args[0]||packetRoot);const groups=await packets.scan(dir);return out(groups.map(g=>({setId:g.descriptor.setId,logicalName:g.descriptor.logicalName,validPackets:g.packets.length,required:g.descriptor.dataShards,descriptorHash:g.descriptorHash,packetIndexes:g.packets.map(p=>p.index)})))}if(cmd==='recover'){const output=path.resolve(args[0]||`jsondb-airgap-recovered-${Date.now()}.json`),setId=args[1]||null,dir=path.resolve(args[2]||packetRoot);return out(await packets.recoverTo(dir,output,setId))}usage();process.exitCode=2}
+main().catch(e=>{console.error(e.stack||e);if(e.details)console.error(JSON.stringify(e.details,null,2));process.exitCode=1});
