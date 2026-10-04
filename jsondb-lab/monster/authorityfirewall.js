@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { now, ensureDir, readJson, atomicJson, appendJsonl, readJsonl } = require('./jsonfs');
 
 function digest(value) { return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
+function clone(value) { return value == null ? value : JSON.parse(JSON.stringify(value)); }
 
 class AuthorityFirewall {
   constructor({ savior, contracts }) {
@@ -18,11 +19,6 @@ class AuthorityFirewall {
   async init() {
     await ensureDir(this.root);
     if (!(await readJson(this.head, null))) await atomicJson(this.head, { sequence: 0, decisionHash: null, createdAt: now() });
-  }
-
-  async contract(actor) {
-    const registry = await this.contracts.init();
-    return registry.contracts?.[actor] || null;
   }
 
   evaluateContract(contract, action, detail = {}) {
@@ -65,8 +61,19 @@ class AuthorityFirewall {
   }
 
   async evaluate(actor, action, detail = {}) {
-    const contract = await this.contract(actor);
-    return { actor, action, detail, contract: contract ? { id: contract.id, kind: contract.kind } : null, ...this.evaluateContract(contract, action, detail) };
+    const registry = await this.contracts.init();
+    const contract = registry.contracts?.[actor] || null;
+    const snapshot = clone(contract);
+    return {
+      actor,
+      action,
+      detail,
+      registryHash: registry.registryHash,
+      contract: snapshot ? { id: snapshot.id, kind: snapshot.kind } : null,
+      contractSnapshot: snapshot,
+      contractHash: snapshot ? digest(snapshot) : null,
+      ...this.evaluateContract(snapshot, action, detail)
+    };
   }
 
   async decide(actor, action, detail = {}) {
@@ -74,20 +81,25 @@ class AuthorityFirewall {
     const evaluation = await this.evaluate(actor, action, detail);
     const head = await readJson(this.head, { sequence: 0, decisionHash: null });
     const record = {
-      format: 'JSONDB-AUTHORITY-FIREWALL-DECISION-1',
+      format: 'JSONDB-AUTHORITY-FIREWALL-DECISION-2',
       sequence: Number(head.sequence || 0) + 1,
       at: now(),
       previousDecisionHash: head.decisionHash || null,
-      actor, action, detail,
+      actor,
+      action,
+      detail,
+      registryHash: evaluation.registryHash,
+      contract: evaluation.contract,
+      contractHash: evaluation.contractHash,
+      contractSnapshot: evaluation.contractSnapshot,
       allowed: evaluation.allowed,
       reason: evaluation.reason,
-      contract: evaluation.contract,
-      evidence: Object.fromEntries(Object.entries(evaluation).filter(([k]) => !['actor','action','detail','allowed','reason','contract'].includes(k))),
-      doctrine: 'Recovery authority is deny-by-default. No recovery subsystem receives automatic canonical-promotion authority.'
+      evidence: Object.fromEntries(Object.entries(evaluation).filter(([k]) => !['actor','action','detail','registryHash','allowed','reason','contract','contractSnapshot','contractHash'].includes(k))),
+      doctrine: 'Recovery authority is deny-by-default. Each decision carries the exact content-addressed Recovery Contract version used to reach it. No recovery subsystem receives automatic canonical-promotion authority.'
     };
     record.decisionHash = digest(record);
     await appendJsonl(this.ledger, record);
-    await atomicJson(this.head, { sequence: record.sequence, decisionHash: record.decisionHash, at: record.at, actor, action, allowed: record.allowed });
+    await atomicJson(this.head, { sequence: record.sequence, decisionHash: record.decisionHash, at: record.at, actor, action, allowed: record.allowed, registryHash: record.registryHash });
     return record;
   }
 
@@ -102,12 +114,36 @@ class AuthorityFirewall {
     return decision;
   }
 
+  async verifyDecisionPolicy(row) {
+    if (!row.registryHash || !row.contractSnapshot || !row.contractHash) {
+      return { valid: true, legacy: true, warning: 'Decision predates constitution binding and cannot be fully policy-replayed.' };
+    }
+    const registry = await this.contracts.version(row.registryHash);
+    if (!registry) return { valid: false, type: 'REGISTRY_VERSION_MISSING', registryHash: row.registryHash };
+    if (registry.registryHash !== row.registryHash) return { valid: false, type: 'REGISTRY_HASH_MISMATCH', expected: row.registryHash, actual: registry.registryHash };
+    const historicalContract = registry.contracts?.[row.actor] || null;
+    if (!historicalContract) return { valid: false, type: 'HISTORICAL_CONTRACT_MISSING', actor: row.actor, registryHash: row.registryHash };
+    const historicalHash = digest(historicalContract);
+    const snapshotHash = digest(row.contractSnapshot);
+    if (historicalHash !== row.contractHash || snapshotHash !== row.contractHash) {
+      return { valid: false, type: 'CONTRACT_SNAPSHOT_MISMATCH', expected: row.contractHash, historicalHash, snapshotHash };
+    }
+    const replay = this.evaluateContract(row.contractSnapshot, row.action, row.detail || {});
+    if (replay.allowed !== row.allowed || replay.reason !== row.reason) {
+      return { valid: false, type: 'POLICY_REPLAY_MISMATCH', recorded: { allowed: row.allowed, reason: row.reason }, replay: { allowed: replay.allowed, reason: replay.reason } };
+    }
+    return { valid: true, legacy: false, registryHash: row.registryHash, contractHash: row.contractHash };
+  }
+
   async verifyLedger() {
     await this.init();
     const rows = await readJsonl(this.ledger);
     const failures = [];
+    const warnings = [];
     let previous = null;
     let sequence = 1;
+    let replayed = 0;
+    let legacy = 0;
     for (const row of rows) {
       if (row.__corrupt) { failures.push({ sequence, type: 'CORRUPT_JSONL' }); sequence++; continue; }
       const copy = { ...row }; delete copy.decisionHash;
@@ -115,12 +151,26 @@ class AuthorityFirewall {
       if (row.sequence !== sequence) failures.push({ sequence: row.sequence, type: 'SEQUENCE', expected: sequence });
       if (row.previousDecisionHash !== previous) failures.push({ sequence: row.sequence, type: 'PREVIOUS_HASH', expected: previous, actual: row.previousDecisionHash });
       if (actual !== row.decisionHash) failures.push({ sequence: row.sequence, type: 'DECISION_HASH', expected: row.decisionHash, actual });
+      const policy = await this.verifyDecisionPolicy(row);
+      if (!policy.valid) failures.push({ sequence: row.sequence, ...policy });
+      else if (policy.legacy) { legacy++; warnings.push({ sequence: row.sequence, type: 'LEGACY_UNBOUND_POLICY_DECISION', warning: policy.warning }); }
+      else replayed++;
       previous = row.decisionHash;
       sequence++;
     }
     const head = await readJson(this.head, null);
     if (head && head.decisionHash !== previous) failures.push({ type: 'HEAD_MISMATCH', expected: previous, actual: head.decisionHash });
-    return { format: 'JSONDB-AUTHORITY-FIREWALL-VERIFY-1', valid: failures.length === 0, decisions: rows.length, headHash: previous, failures };
+    return {
+      format: 'JSONDB-AUTHORITY-FIREWALL-VERIFY-2',
+      valid: failures.length === 0,
+      fullyPolicyReplayable: failures.length === 0 && legacy === 0,
+      decisions: rows.length,
+      policyReplayedDecisions: replayed,
+      legacyUnboundDecisions: legacy,
+      headHash: previous,
+      failures,
+      warnings
+    };
   }
 }
 
