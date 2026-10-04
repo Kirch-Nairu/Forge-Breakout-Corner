@@ -12,6 +12,9 @@ class RecoveryContractRegistry{
   this.file=path.join(this.root,'registry.json');
   this.versions=path.join(this.root,'versions');
  }
+ async archiveNames(){
+  return(await fsp.readdir(this.root).catch(()=>[])).filter(name=>/^registry-.*\.json$/.test(name)&&name!=='registry.json').sort();
+ }
  async persistVersion(registry,options={}){
   if(!registry?.registryHash)return false;
   const computed=registryContentHash(registry);
@@ -24,9 +27,19 @@ class RecoveryContractRegistry{
   if(!(await readJson(file,null)))await atomicJson(file,registry);
   return true;
  }
+ async readArchivedVersion(registryHash){
+  if(!registryHash)return null;
+  for(const name of await this.archiveNames()){
+   const archived=await readJson(path.join(this.root,name),null);
+   if(!archived||archived.registryHash!==registryHash)continue;
+   if(registryContentHash(archived)!==registryHash)continue;
+   return archived;
+  }
+  return null;
+ }
  async hydrateArchiveVersions(){
   await ensureDir(this.root);await ensureDir(this.versions);
-  const names=(await fsp.readdir(this.root).catch(()=>[])).filter(name=>/^registry-.*\.json$/.test(name)&&name!=='registry.json');
+  const names=await this.archiveNames();
   let hydrated=0,skipped=0;
   for(const name of names){
    const archived=await readJson(path.join(this.root,name),null);
@@ -35,6 +48,34 @@ class RecoveryContractRegistry{
    if(ok)hydrated++;else skipped++;
   }
   return{archives:names.length,hydrated,skipped};
+ }
+ async inspect(){
+  const registry=await readJson(this.file,null);
+  if(!registry)return{valid:false,status:'ABSENT',registryHash:null,computedRegistryHash:null,automaticPromoters:null,violations:[{type:'REGISTRY_ABSENT'}]};
+  const computedRegistryHash=registryContentHash(registry);
+  const contracts=Object.values(registry.contracts||{});
+  const violations=[];
+  if(computedRegistryHash!==registry.registryHash)violations.push({type:'REGISTRY_CONTENT_HASH_MISMATCH',declared:registry.registryHash,computed:computedRegistryHash});
+  for(const contract of contracts){
+   if(contract?.mayPromoteCanonical===true)violations.push({type:'AUTO_PROMOTION_AUTHORITY',id:contract.id});
+   if(contract?.kind==='corroborative'&&(contract.reconstructs||[]).length)violations.push({type:'CORROBORATOR_RECONSTRUCTS',id:contract.id});
+   if(contract?.kind==='planning'&&(contract.mayNominate||contract.mayAuthorize||(contract.reconstructs||[]).length))violations.push({type:'PLANNER_AUTHORITY_ESCALATION',id:contract.id});
+   if(contract?.kind==='planning-evidence'&&(contract.mayNominate||contract.mayAuthorize||(contract.reconstructs||[]).length))violations.push({type:'PLANNING_EVIDENCE_AUTHORITY_ESCALATION',id:contract.id});
+   if(contract?.kind==='policy-enforcement'&&(contract.mayNominate||contract.mayAuthorize||(contract.reconstructs||[]).length))violations.push({type:'FIREWALL_AUTHORITY_ESCALATION',id:contract.id});
+   if(contract?.id==='policy-checkpoint'&&(contract.mayNominate||contract.mayAuthorize||(contract.reconstructs||[]).length))violations.push({type:'POLICY_CHECKPOINT_AUTHORITY_ESCALATION',id:contract.id});
+  }
+  return{
+   format:'JSONDB-RECOVERY-CONTRACT-FORENSIC-INSPECT-1',
+   valid:violations.length===0,
+   status:'PRESENT',
+   registryHash:registry.registryHash||null,
+   computedRegistryHash,
+   formatVersion:registry.format||null,
+   contracts:contracts.length,
+   automaticPromoters:contracts.filter(c=>c?.mayPromoteCanonical===true).length,
+   violations,
+   doctrine:'Read-only inspection never creates, migrates, hydrates, or rewrites Recovery Contract state.'
+  };
  }
  async init(){
   await ensureDir(this.root);await ensureDir(this.versions);
@@ -47,14 +88,14 @@ class RecoveryContractRegistry{
   await this.persistVersion(r);
   return r;
  }
- async version(registryHash){
+ async version(registryHash,options={}){
   if(!registryHash)return null;
-  await ensureDir(this.versions);
-  let found=await readJson(path.join(this.versions,`${registryHash}.json`),null);
+  const found=await readJson(path.join(this.versions,`${registryHash}.json`),null);
   if(found)return found;
-  await this.hydrateArchiveVersions();
-  found=await readJson(path.join(this.versions,`${registryHash}.json`),null);
-  return found;
+  const archived=await this.readArchivedVersion(registryHash);
+  if(!archived)return null;
+  if(options.hydrate!==false)await this.persistVersion(archived);
+  return archived;
  }
  contract(id,kind,reconstructs,corroborates,dependencies,extra={}){return{id,kind,reconstructs,corroborates,dependencies,mayAutoRepair:extra.mayAutoRepair||[],mayNominate:Boolean(extra.mayNominate),mayAuthorize:Boolean(extra.mayAuthorize),mayPromoteCanonical:false,forbidden:[...(extra.forbidden||[]),'silent-canonical-promotion'],notes:extra.notes||[]};}
  build(){
