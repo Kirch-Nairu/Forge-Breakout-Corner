@@ -114,11 +114,11 @@ class AuthorityFirewall {
     return decision;
   }
 
-  async verifyDecisionPolicy(row) {
+  async verifyDecisionPolicy(row, options = {}) {
     if (!row.registryHash || !row.contractSnapshot || !row.contractHash) {
       return { valid: true, legacy: true, warning: 'Decision predates constitution binding and cannot be fully policy-replayed.' };
     }
-    const registry = await this.contracts.version(row.registryHash);
+    const registry = await this.contracts.version(row.registryHash, { hydrate: options.readOnly !== true && options.hydrateContracts !== false });
     if (!registry) return { valid: false, type: 'REGISTRY_VERSION_MISSING', registryHash: row.registryHash };
     const registryCopy = { ...registry }; delete registryCopy.registryHash;
     const computedRegistryHash = digest(registryCopy);
@@ -139,12 +139,12 @@ class AuthorityFirewall {
     return { valid: true, legacy: false, registryHash: row.registryHash, contractHash: row.contractHash };
   }
 
-  async verifyPrefix(count = null) {
-    await this.init();
+  async verifyPrefix(count = null, options = {}) {
+    if (options.readOnly !== true) await this.init();
     const allRows = await readJsonl(this.ledger);
     const requested = count == null ? allRows.length : Math.max(0, Number(count));
-    if (!Number.isInteger(requested)) return { format: 'JSONDB-AUTHORITY-FIREWALL-PREFIX-VERIFY-1', valid: false, type: 'INVALID_PREFIX_COUNT', requested: count };
-    if (requested > allRows.length) return { format: 'JSONDB-AUTHORITY-FIREWALL-PREFIX-VERIFY-1', valid: false, type: 'PREFIX_BEYOND_LEDGER', requested, available: allRows.length };
+    if (!Number.isInteger(requested)) return { format: 'JSONDB-AUTHORITY-FIREWALL-PREFIX-VERIFY-2', valid: false, type: 'INVALID_PREFIX_COUNT', requested: count };
+    if (requested > allRows.length) return { format: 'JSONDB-AUTHORITY-FIREWALL-PREFIX-VERIFY-2', valid: false, type: 'PREFIX_BEYOND_LEDGER', requested, available: allRows.length };
     const rows = allRows.slice(0, requested);
     const failures = [];
     const warnings = [];
@@ -160,16 +160,17 @@ class AuthorityFirewall {
       if (row.sequence !== sequence) failures.push({ sequence: row.sequence, type: 'SEQUENCE', expected: sequence });
       if (row.previousDecisionHash !== previous) failures.push({ sequence: row.sequence, type: 'PREVIOUS_HASH', expected: previous, actual: row.previousDecisionHash });
       if (actual !== row.decisionHash) failures.push({ sequence: row.sequence, type: 'DECISION_HASH', expected: row.decisionHash, actual });
-      const policy = await this.verifyDecisionPolicy(row);
+      const policy = await this.verifyDecisionPolicy(row, options);
       if (!policy.valid) failures.push({ sequence: row.sequence, ...policy });
       else if (policy.legacy) { legacy++; warnings.push({ sequence: row.sequence, type: 'LEGACY_UNBOUND_POLICY_DECISION', warning: policy.warning }); }
       else replayed++;
       previous = row.decisionHash;
     }
     return {
-      format: 'JSONDB-AUTHORITY-FIREWALL-PREFIX-VERIFY-1',
+      format: 'JSONDB-AUTHORITY-FIREWALL-PREFIX-VERIFY-2',
       valid: failures.length === 0,
       fullyPolicyReplayable: failures.length === 0 && legacy === 0,
+      readOnly: options.readOnly === true,
       decisionsChecked: rows.length,
       availableDecisions: allRows.length,
       policyReplayedDecisions: replayed,
@@ -180,12 +181,12 @@ class AuthorityFirewall {
     };
   }
 
-  async verifyReferences(references = []) {
-    await this.init();
+  async verifyReferences(references = [], options = {}) {
+    if (options.readOnly !== true) await this.init();
     const refs = (references || []).filter(x => x && Number.isInteger(Number(x.sequence)) && x.decisionHash);
     const maxSequence = refs.reduce((m, x) => Math.max(m, Number(x.sequence)), 0);
-    const prefix = await this.verifyPrefix(maxSequence);
-    if (!prefix.valid) return { format: 'JSONDB-AUTHORITY-FIREWALL-REFERENCE-VERIFY-1', valid: false, prefix, references: [] };
+    const prefix = await this.verifyPrefix(maxSequence, options);
+    if (!prefix.valid) return { format: 'JSONDB-AUTHORITY-FIREWALL-REFERENCE-VERIFY-2', valid: false, prefix, references: [] };
     const ledger = await readJsonl(this.ledger);
     const results = refs.map(ref => {
       const sequence = Number(ref.sequence);
@@ -200,24 +201,44 @@ class AuthorityFirewall {
       };
     });
     return {
-      format: 'JSONDB-AUTHORITY-FIREWALL-REFERENCE-VERIFY-1',
+      format: 'JSONDB-AUTHORITY-FIREWALL-REFERENCE-VERIFY-2',
       valid: prefix.valid && results.every(x => x.valid),
+      readOnly: options.readOnly === true,
       prefix,
       references: results,
       maxSequence
     };
   }
 
-  async verifyLedger() {
-    await this.init();
+  async verifyLedger(options = {}) {
+    if (options.readOnly !== true) await this.init();
     const rows = await readJsonl(this.ledger);
-    const prefix = await this.verifyPrefix(rows.length);
-    const failures = [...(prefix.failures || [])];
     const head = await readJson(this.head, null);
+    if (options.readOnly === true && rows.length === 0 && !head) {
+      return {
+        format: 'JSONDB-AUTHORITY-FIREWALL-VERIFY-4',
+        valid: false,
+        status: 'ABSENT',
+        readOnly: true,
+        fullyPolicyReplayable: false,
+        decisions: 0,
+        policyReplayedDecisions: 0,
+        legacyUnboundDecisions: 0,
+        headHash: null,
+        failures: [],
+        warnings: []
+      };
+    }
+    const prefix = await this.verifyPrefix(rows.length, options);
+    const failures = [...(prefix.failures || [])];
+    if (!head && rows.length) failures.push({ type: 'HEAD_MISSING', expected: prefix.headHash, actual: null });
     if (head && head.decisionHash !== prefix.headHash) failures.push({ type: 'HEAD_MISMATCH', expected: prefix.headHash, actual: head.decisionHash });
+    if (head && Number(head.sequence || 0) !== rows.length) failures.push({ type: 'HEAD_SEQUENCE_MISMATCH', expected: rows.length, actual: Number(head.sequence || 0) });
     return {
-      format: 'JSONDB-AUTHORITY-FIREWALL-VERIFY-3',
+      format: 'JSONDB-AUTHORITY-FIREWALL-VERIFY-4',
       valid: failures.length === 0,
+      status: 'PRESENT',
+      readOnly: options.readOnly === true,
       fullyPolicyReplayable: failures.length === 0 && prefix.legacyUnboundDecisions === 0,
       decisions: rows.length,
       policyReplayedDecisions: prefix.policyReplayedDecisions,
