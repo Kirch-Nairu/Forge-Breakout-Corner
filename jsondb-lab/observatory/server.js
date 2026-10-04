@@ -18,7 +18,8 @@ const staticRoutes = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
-  ['/app.js', ['app.js', 'text/javascript; charset=utf-8']]
+  ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/index-lab.js', ['index-lab.js', 'text/javascript; charset=utf-8']]
 ]);
 
 const observedSurfaces = [
@@ -102,6 +103,80 @@ async function collectionSummaries(catalog) {
     });
   }
   return result;
+}
+
+function primitiveFieldOptions(rows) {
+  const stats = new Map();
+  for (const row of rows.slice(0, 500)) {
+    for (const [field, value] of Object.entries(row || {})) {
+      if (value == null || !['string', 'number', 'boolean'].includes(typeof value)) continue;
+      const current = stats.get(field) || { field, number: 0, string: 0, boolean: 0, seen: 0 };
+      current[typeof value]++;
+      current.seen++;
+      stats.set(field, current);
+    }
+  }
+  return [...stats.values()]
+    .sort((a, b) => b.seen - a.seen || a.field.localeCompare(b.field))
+    .map(item => ({
+      field: item.field,
+      dominantType: ['number', 'string', 'boolean'].sort((a, b) => item[b] - item[a])[0],
+      observed: item.seen
+    }));
+}
+
+async function indexLab(collection) {
+  const catalog = await readJson(path.join(dataRoot, 'catalog.json'), { collections: {} });
+  if (!collection || typeof collection !== 'string' || !Object.prototype.hasOwnProperty.call(catalog.collections || {}, collection)) {
+    return { status: 404, body: { error: 'COLLECTION_NOT_FOUND', message: 'Index Lab only accepts collection names present in the canonical catalog.' } };
+  }
+  const [table, indexDoc] = await Promise.all([
+    readJson(path.join(dataRoot, 'current', `${collection}.json`), null),
+    readJson(path.join(dataRoot, 'indexes', `${collection}.json`), null)
+  ]);
+  if (!table) return { status: 404, body: { error: 'CURRENT_TABLE_NOT_FOUND' } };
+  const rows = Array.isArray(table.rows) ? table.rows.slice(0, 500) : [];
+  const indexes = Object.entries(indexDoc?.indexes || {}).map(([name, idx]) => {
+    const buckets = Object.entries(idx.map || {}).map(([key, rowIds]) => ({ key, rowIds }));
+    return {
+      name,
+      fields: idx.fields || [],
+      unique: Boolean(idx.unique),
+      distinct: Number(idx.distinct ?? buckets.length),
+      bucketCount: buckets.length,
+      buckets: buckets.slice(0, 500)
+    };
+  });
+  return {
+    status: 200,
+    body: {
+      format: 'JSONDB-OMEGA-OBSERVATORY-INDEX-LAB-1',
+      observedAt: new Date().toISOString(),
+      authority: 'READ_ONLY_OBSERVER',
+      collection,
+      truth: {
+        engineIndexStructure: 'HASH_MAP',
+        actualBuildSemantics: 'For every table row, encode configured index field value(s) into a key and append row.id to that key bucket.',
+        persistedArtifact: `indexes/${collection}.json`,
+        sortAnimation: 'EXPLAIN_ONLY',
+        sortWarning: 'The engine does not sort rows to build this index. Sorting animations use real rows but execute only in browser memory.'
+      },
+      table: {
+        rowCount: Number(table.meta?.rows ?? rows.length),
+        revision: Number(table.meta?.revision || 0),
+        lastTx: Number(table.meta?.lastTx || 0),
+        rowsTruncated: Array.isArray(table.rows) && table.rows.length > rows.length,
+        rows
+      },
+      indexArtifact: indexDoc ? {
+        builtAt: indexDoc.builtAt || null,
+        tx: Number(indexDoc.tx || 0),
+        rowCount: Number(indexDoc.rowCount || 0),
+        indexes
+      } : { builtAt: null, tx: 0, rowCount: 0, indexes: [] },
+      sortFields: primitiveFieldOptions(rows)
+    }
+  };
 }
 
 async function snapshot() {
@@ -268,6 +343,10 @@ const server = http.createServer(async (req, res) => {
       clients: clients.size
     });
     if (url.pathname === '/api/snapshot') return sendJson(res, 200, await snapshot());
+    if (url.pathname === '/api/index-lab') {
+      const result = await indexLab(url.searchParams.get('collection'));
+      return sendJson(res, result.status, result.body);
+    }
     if (url.pathname === '/api/events') {
       res.writeHead(200, securityHeaders({
         'Content-Type': 'text/event-stream; charset=utf-8',
