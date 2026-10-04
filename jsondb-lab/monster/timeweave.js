@@ -74,7 +74,7 @@ class TimeWeave {
       if (target.epochHash !== anchor.epochHash || target.weaveHash !== anchor.weaveHash) failures.push({ type: 'ANCHOR_CONTRADICTION', anchor, actual: { epochHash: target.epochHash, weaveHash: target.weaveHash } });
     }
     let polyhash = null;
-    if (this.polyhash && node.polyhash) polyhash = await this.polyhash.verify({ ...copy, weaveHash: node.weaveHash }, node.polyhash);
+    if (this.polyhash && node.polyhash) polyhash = await this.polyhash.verify({ ...copy, weaveHash: node.weaveHash }, node.polyhash, { readOnly });
     if (polyhash && !polyhash.valid) failures.push({ type: 'POLYHASH_INVALID' });
     return { valid: failures.length === 0, status: failures.length ? 'INVALID' : 'VALID', readOnly, epochId: node.epochId, position: node.position, failures, polyhash };
   }
