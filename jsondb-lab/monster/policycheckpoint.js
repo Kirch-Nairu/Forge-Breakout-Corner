@@ -86,14 +86,15 @@ class PolicyCheckpoint {
     const forwardRecord = forward.results?.find(x => x.sequence === record.forwardWitness?.sequence) || null;
     const forwardValid = Boolean(forward.valid && forwardRecord?.valid && forwardRecord.subjectHash === record.coreHash && forwardRecord.attestationHash === record.forwardWitness.attestationHash);
     const cryptoValid = Boolean(crypto.valid && crypto.worldRoot === record.coreHash && Number(crypto.familyQuorum || 0) >= 2);
+    const historicalValidation = this.k.recoveryContracts.validateRegistry(historicalContracts);
     const historicalRegistryAvailable = Boolean(historicalContracts?.registryHash && historicalContracts.registryHash === record.contracts?.registryHash);
-    const historicalRegistrySafe = Boolean(historicalRegistryAvailable && record.contracts?.valid === true && Number(record.contracts?.violations || 0) === 0 && Object.values(historicalContracts?.contracts || {}).every(c => c?.mayPromoteCanonical !== true));
+    const historicalRegistrySafe = Boolean(historicalRegistryAvailable && historicalValidation.valid && record.contracts?.valid === true && Number(record.contracts?.violations || 0) === 0);
     const currentRegistryMatches = Boolean(currentContracts?.registryHash && currentContracts.registryHash === record.contracts?.registryHash);
     const prefixHeadMatches = Boolean(prefix.valid && prefix.decisionsChecked === checkpointCount && prefix.headHash === (record.firewall?.headHash || null));
     const historicalPrefixValid = Boolean(prefix.valid && prefixHeadMatches);
 
     return {
-      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-5',
+      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-6',
       id: record.id,
       valid: computedCheckpointHash === record.checkpointHash && computedCoreHash === record.coreHash && cryptoValid && forwardValid && historicalRegistrySafe && historicalPrefixValid,
       readOnly,
@@ -103,6 +104,7 @@ class PolicyCheckpoint {
       forwardWitnessValid: forwardValid,
       historicalRegistryAvailable,
       historicalRegistrySafe,
+      historicalRegistryViolations: historicalValidation.violations || [],
       currentRegistryMatches,
       policyDriftedSinceCheckpoint: historicalRegistryAvailable && !currentRegistryMatches,
       checkpointDecisionCount: checkpointCount,
@@ -116,7 +118,7 @@ class PolicyCheckpoint {
       futureTailIncident: historicalPrefixValid && liveFirewall.status !== 'ABSENT' && liveFirewall.valid === false,
       checkpointFirewallHead: record.firewall?.headHash || null,
       liveFirewallHead: liveFirewall.headHash || null,
-      doctrine: 'Historical validity is based on the exact checkpointed Firewall prefix and historical constitution. Later-tail corruption is surfaced separately as a current incident. Read-only verification does not hydrate policy indexes.'
+      doctrine: 'Historical validity is based on the exact checkpointed Firewall prefix and a freshly revalidated historical constitution. Later-tail corruption is surfaced separately as a current incident. Read-only verification does not hydrate policy indexes.'
     };
   }
 }
