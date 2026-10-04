@@ -1,0 +1,42 @@
+name: Recovery Forensic Self-Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'jsondb-lab/**'
+      - '.github/workflows/recovery-forensic-selftest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recovery-forensic-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  forensic-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax-check JSONDB lab JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          find jsondb-lab -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: Bootstrap isolated recovery state
+        run: node jsondb-lab/recovery-selftest.js --bootstrap
+
+      - name: Verify forensic read-only recovery state
+        run: node jsondb-lab/recovery-selftest.js
