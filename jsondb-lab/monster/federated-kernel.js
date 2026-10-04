@@ -17,7 +17,7 @@ const { SpacetimeArk } = require('./spacetimeark');
 const { SemanticDeltaFossils } = require('./fossils');
 const { RecoveryGeometry } = require('./recoverygeometry');
 const { RecoveryContractRegistry } = require('./recoverycontracts');
-const { AuthorityFirewall } = require('./authorityfirewall');
+const { GuardedAuthorityFirewall } = require('./guardedfirewall');
 const { RecoveryNavigator } = require('./recoverynavigator');
 const { PolicyCheckpoint } = require('./policycheckpoint');
 const { ProofCarryingRecoveryPlan } = require('./proofplan');
@@ -45,7 +45,7 @@ class FederatedOmegaKernel extends OmegaKernel {
     this.fossils = new SemanticDeltaFossils({ savior: this.savior, memory: this.memory });
     this.federation = new OmegaFederation({ savior: this.savior, epochSealer: this.epochSealer, timeWeave: this.timeWeave, temporalParity: this.temporalParity, historyCourt: this.historyCourt, worldTree: this.worldTree, polyhash: this.polyhash, hologram: this.hologram });
     this.recoveryContracts = new RecoveryContractRegistry(this.savior);
-    this.authorityFirewall = new AuthorityFirewall({ savior: this.savior, contracts: this.recoveryContracts });
+    this.authorityFirewall = new GuardedAuthorityFirewall({ savior: this.savior, contracts: this.recoveryContracts });
     this.lastSavior = new LastSaviorArchive(this);
     this.recoveryJury = new RecoveryJury(this);
     this.juryGate = new JuryPromotionGate({ savior: this.savior, jury: this.recoveryJury, promotion: this.promotion, firewall: this.authorityFirewall });
