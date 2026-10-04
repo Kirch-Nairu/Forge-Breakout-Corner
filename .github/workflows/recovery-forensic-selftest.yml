@@ -84,8 +84,66 @@ jobs:
           async function main() {
             const kernel = new FederatedOmegaKernel(path.join(process.cwd(), 'jsondb-lab'));
             const result = await kernel.lastSavior.verify(null, { live: false, readOnly: true });
-            process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-            if (!result.valid) process.exitCode = 1;
+            process.stdout.write(`${JSON.stringify({
+              valid: result.valid,
+              id: result.id,
+              healthyChannels: result.healthyChannels,
+              totalBooleanChannels: result.totalBooleanChannels,
+              independentEvidence: result.independentEvidence
+            }, null, 2)}\n`);
+            if (!result.valid) {
+              process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+              process.exitCode = 1;
+            }
+          }
+
+          main().catch(error => {
+            console.error(error.stack || error);
+            process.exitCode = 1;
+          });
+          NODE
+
+      - name: Build representative policy and planning artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const path = require('path');
+          const { FederatedOmegaKernel } = require('./jsondb-lab/monster/federated-kernel');
+
+          async function main() {
+            const kernel = new FederatedOmegaKernel(path.join(process.cwd(), 'jsondb-lab'));
+            await kernel.init();
+
+            const plan = await kernel.recoveryNavigator.plan({ goal: 'world', minimumCorroborators: 2 });
+            const planCheck = await kernel.recoveryNavigator.verify(plan.id);
+            if (!planCheck.valid) throw new Error(`Navigator fixture failed verification: ${plan.id}`);
+
+            const checkpoint = await kernel.policyCheckpoint.capture('ci-policy-fixture');
+            const proof = await kernel.proofPlan.create('ci-proof-fixture', { planId: plan.id, allowBlocked: true });
+
+            const mutation = await kernel.planMutation.run('ci-mutation-fixture', {
+              goal: 'world',
+              minimumCorroborators: 2,
+              capabilities: ['memoryPalace'],
+              pairLimit: 0
+            });
+            const mutationAudit = await kernel.mutationAudit.verify(mutation.id);
+            if (!mutationAudit.valid) {
+              process.stdout.write(`${JSON.stringify(mutationAudit, null, 2)}\n`);
+              throw new Error(`Mutation audit fixture failed: ${mutation.id}`);
+            }
+
+            const court = await kernel.historyCourt.compare('federation', 'federation', { previewMerge: false });
+
+            process.stdout.write(`${JSON.stringify({
+              navigator: { id: plan.id, status: plan.status, valid: planCheck.valid, source: plan.source?.id || null },
+              checkpoint: { id: checkpoint.id, checkpointHash: checkpoint.checkpointHash },
+              proofPlan: { id: proof.id, dossierHash: proof.dossierHash },
+              mutation: { id: mutation.id, summary: mutation.summary },
+              mutationAudit: { valid: mutationAudit.valid, replayValid: mutationAudit.replayValid },
+              historyCourt: { id: court.id, verdict: court.verdict, caseHash: court.caseHash }
+            }, null, 2)}\n`);
           }
 
           main().catch(error => {
