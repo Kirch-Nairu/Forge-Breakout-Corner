@@ -70,16 +70,17 @@ class CanonicalizationQuorum {
   }
 
   async verify(value, options = {}) {
-    await this.init();
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const result = this.fingerprint(value);
-    if (this.root) {
+    if (!readOnly && this.root) {
       const persisted = { ...result }; delete persisted._texts;
       await atomicJson(path.join(this.root, 'latest.json'), persisted);
     }
-    if (!result.unanimous && this.savior && options.freezeOnDivergence !== false) {
+    if (!readOnly && !result.unanimous && this.savior && options.freezeOnDivergence !== false) {
       await this.savior.setMode('read-only', 'Canonicalization quorum diverged: semantic identity algorithm disagreement.');
     }
-    return result;
+    return { ...result, readOnly };
   }
 }
 
