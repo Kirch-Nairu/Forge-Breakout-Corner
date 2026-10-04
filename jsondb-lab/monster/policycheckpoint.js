@@ -64,41 +64,45 @@ class PolicyCheckpoint {
     return record;
   }
 
-  async verify(id = null) {
-    await this.init();
+  async verify(id = null, options = {}) {
+    if (options.readOnly !== true) await this.init();
     const record = id ? await readJson(path.join(this.records, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!record) return { valid: false, status: 'ABSENT' };
+    if (!record) return { valid: false, status: 'ABSENT', readOnly: options.readOnly === true };
     const copy = { ...record }; delete copy.checkpointHash;
     const computedCheckpointHash = digest(copy);
     const coreCopy = { ...record };
     delete coreCopy.coreHash; delete coreCopy.cryptoCouncil; delete coreCopy.forwardWitness; delete coreCopy.checkpointHash;
     const computedCoreHash = digest(coreCopy);
     const checkpointCount = Number(record.firewall?.decisions || 0);
+    const readOnly = options.readOnly === true;
     const [crypto, forward, prefix, liveFirewall, historicalContracts, currentContracts] = await Promise.all([
       this.k.cryptoCouncil.verify(record.cryptoCouncil?.id).catch(error => ({ valid: false, error: error.message })),
       this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
-      this.k.authorityFirewall.verifyPrefix(checkpointCount).catch(error => ({ valid: false, error: error.message })),
-      this.k.authorityFirewall.verifyLedger().catch(error => ({ valid: false, error: error.message })),
-      this.k.recoveryContracts.version(record.contracts?.registryHash || null).catch(() => null),
-      this.k.recoveryContracts.init().catch(() => null)
+      this.k.authorityFirewall.verifyPrefix(checkpointCount, { readOnly }).catch(error => ({ valid: false, error: error.message })),
+      this.k.authorityFirewall.verifyLedger({ readOnly }).catch(error => ({ valid: false, error: error.message })),
+      this.k.recoveryContracts.version(record.contracts?.registryHash || null, { hydrate: !readOnly }).catch(() => null),
+      readOnly ? this.k.recoveryContracts.inspect().catch(() => null) : this.k.recoveryContracts.init().catch(() => null)
     ]);
     const forwardRecord = forward.results?.find(x => x.sequence === record.forwardWitness?.sequence) || null;
     const forwardValid = Boolean(forward.valid && forwardRecord?.valid && forwardRecord.subjectHash === record.coreHash && forwardRecord.attestationHash === record.forwardWitness.attestationHash);
     const cryptoValid = Boolean(crypto.valid && crypto.worldRoot === record.coreHash && Number(crypto.familyQuorum || 0) >= 2);
     const historicalRegistryAvailable = Boolean(historicalContracts?.registryHash && historicalContracts.registryHash === record.contracts?.registryHash);
+    const historicalRegistrySafe = Boolean(historicalRegistryAvailable && record.contracts?.valid === true && Number(record.contracts?.violations || 0) === 0 && Object.values(historicalContracts?.contracts || {}).every(c => c?.mayPromoteCanonical !== true));
     const currentRegistryMatches = Boolean(currentContracts?.registryHash && currentContracts.registryHash === record.contracts?.registryHash);
     const prefixHeadMatches = Boolean(prefix.valid && prefix.decisionsChecked === checkpointCount && prefix.headHash === (record.firewall?.headHash || null));
     const historicalPrefixValid = Boolean(prefix.valid && prefixHeadMatches);
 
     return {
-      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-4',
+      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-5',
       id: record.id,
-      valid: computedCheckpointHash === record.checkpointHash && computedCoreHash === record.coreHash && cryptoValid && forwardValid && historicalRegistryAvailable && historicalPrefixValid,
+      valid: computedCheckpointHash === record.checkpointHash && computedCoreHash === record.coreHash && cryptoValid && forwardValid && historicalRegistrySafe && historicalPrefixValid,
+      readOnly,
       staticValid: computedCheckpointHash === record.checkpointHash,
       coreValid: computedCoreHash === record.coreHash,
       cryptoCouncilValid: cryptoValid,
       forwardWitnessValid: forwardValid,
       historicalRegistryAvailable,
+      historicalRegistrySafe,
       currentRegistryMatches,
       policyDriftedSinceCheckpoint: historicalRegistryAvailable && !currentRegistryMatches,
       checkpointDecisionCount: checkpointCount,
@@ -107,11 +111,12 @@ class PolicyCheckpoint {
       historicalPrefixFullyPolicyReplayable: prefix.fullyPolicyReplayable,
       historicalPrefixLegacyUnboundDecisions: prefix.legacyUnboundDecisions || 0,
       liveFirewallLedgerValid: liveFirewall.valid,
+      liveFirewallStatus: liveFirewall.status || 'PRESENT',
       liveFirewallFullyPolicyReplayable: liveFirewall.fullyPolicyReplayable,
-      futureTailIncident: historicalPrefixValid && liveFirewall.valid === false,
+      futureTailIncident: historicalPrefixValid && liveFirewall.status !== 'ABSENT' && liveFirewall.valid === false,
       checkpointFirewallHead: record.firewall?.headHash || null,
       liveFirewallHead: liveFirewall.headHash || null,
-      doctrine: 'Historical validity is based on the exact checkpointed Firewall prefix and historical constitution. Later-tail corruption is surfaced separately as a current incident.'
+      doctrine: 'Historical validity is based on the exact checkpointed Firewall prefix and historical constitution. Later-tail corruption is surfaced separately as a current incident. Read-only verification does not hydrate policy indexes.'
     };
   }
 }
