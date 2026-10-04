@@ -214,6 +214,102 @@ jobs:
           });
           NODE
 
+      - name: Inject corruption and prove forensic verification does not repair it
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fsp = require('fs/promises');
+          const path = require('path');
+          const { FederatedOmegaKernel } = require('./jsondb-lab/monster/federated-kernel');
+          const { readJson } = require('./jsondb-lab/monster/jsonfs');
+
+          async function testHistoricalContractFallback(kernel) {
+            const archive = await readJson(path.join(kernel.lastSavior.root, 'latest.json'), null);
+            const registryHash = archive?.corroborationFamilies?.recoveryContracts?.registryHash;
+            if (!registryHash) throw new Error('LAST SAVIOR fixture has no historical Recovery Contract hash.');
+            const versionFile = path.join(kernel.recoveryContracts.versions, `${registryHash}.json`);
+            const original = await fsp.readFile(versionFile);
+            const corrupt = Buffer.from(`${JSON.stringify({ format: 'CI-CORRUPTED-CONTRACT-VERSION', registryHash, contracts: {} })}\n`);
+            try {
+              await fsp.writeFile(versionFile, corrupt);
+              const resolved = await kernel.recoveryContracts.version(registryHash, { hydrate: false });
+              const after = await fsp.readFile(versionFile);
+              const validation = kernel.recoveryContracts.validateRegistry(resolved);
+              return {
+                valid: Boolean(resolved?.registryHash === registryHash && validation.valid && after.equals(corrupt)),
+                fallbackResolved: resolved?.registryHash === registryHash,
+                fallbackConstitutionValid: validation.valid,
+                corruptedVersionLeftUntouched: after.equals(corrupt)
+              };
+            } finally {
+              await fsp.writeFile(versionFile, original);
+            }
+          }
+
+          async function testMemoryPalaceNoRepair(kernel) {
+            const manifest = await readJson(path.join(kernel.memory.root, 'latest.json'), null);
+            const chunk = manifest?.chunks?.[0];
+            if (!manifest?.id || !chunk?.hash) throw new Error('Memory Palace fixture has no chunk to corrupt.');
+            const primary = kernel.memory.objectFile(chunk.hash);
+            const original = await fsp.readFile(primary);
+            const corrupt = Buffer.from('{"format":"CI-CORRUPTED-MEMORY-PRIMARY"}\n');
+            try {
+              await fsp.writeFile(primary, corrupt);
+              const verification = await kernel.memory.verify(manifest.id, { readOnly: true });
+              const after = await fsp.readFile(primary);
+              const result = verification.chunkResults?.find(row => row.hash === chunk.hash) || null;
+              return {
+                valid: Boolean(verification.valid && result?.recovered && result.source && result.source !== 'primary' && after.equals(corrupt)),
+                memoryVerificationValid: verification.valid,
+                recoveredFrom: result?.source || null,
+                corruptedPrimaryLeftUntouched: after.equals(corrupt)
+              };
+            } finally {
+              await fsp.writeFile(primary, original);
+            }
+          }
+
+          async function testFirewallFutureTail(kernel) {
+            const ledger = kernel.authorityFirewall.ledger;
+            const original = await fsp.readFile(ledger);
+            const tampered = Buffer.concat([original, Buffer.from('{"ci":"tampered-future-tail"}\n')]);
+            try {
+              await fsp.writeFile(ledger, tampered);
+              const checkpoint = await kernel.policyCheckpoint.verify(null, { readOnly: true });
+              const live = await kernel.authorityFirewall.verifyLedger({ readOnly: true });
+              const after = await fsp.readFile(ledger);
+              return {
+                valid: Boolean(checkpoint.valid && checkpoint.historicalPrefixValid && checkpoint.futureTailIncident === true && live.valid === false && after.equals(tampered)),
+                historicalCheckpointStillValid: checkpoint.valid,
+                historicalPrefixStillValid: checkpoint.historicalPrefixValid,
+                futureTailIncidentReported: checkpoint.futureTailIncident === true,
+                liveFirewallRejected: live.valid === false,
+                corruptedTailLeftUntouched: after.equals(tampered)
+              };
+            } finally {
+              await fsp.writeFile(ledger, original);
+            }
+          }
+
+          async function main() {
+            const kernel = new FederatedOmegaKernel(path.join(process.cwd(), 'jsondb-lab'));
+            const results = {
+              historicalContractFallback: await testHistoricalContractFallback(kernel),
+              memoryPalaceNoRepair: await testMemoryPalaceNoRepair(kernel),
+              firewallFutureTail: await testFirewallFutureTail(kernel)
+            };
+            process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
+            const failed = Object.entries(results).filter(([, result]) => result.valid !== true).map(([name]) => name);
+            if (failed.length) throw new Error(`Forensic corruption assertions failed: ${failed.join(', ')}`);
+          }
+
+          main().catch(error => {
+            console.error(error.stack || error);
+            process.exitCode = 1;
+          });
+          NODE
+
       - name: Verify forensic read-only recovery state
         if: always()
         run: node jsondb-lab/recovery-selftest.js
