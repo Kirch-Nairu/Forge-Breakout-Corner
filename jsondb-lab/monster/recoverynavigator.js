@@ -107,12 +107,7 @@ class RecoveryNavigator {
   rankReconstructors(contracts, capabilities, goal) {
     return contracts
       .filter(c => (c.reconstructs || []).some(target => this.targetMatchesGoal(target, goal)) && this.availableContract(c, capabilities))
-      .map(c => ({
-        contract: c,
-        capability: CAPABILITY_MAP[c.id],
-        score: RECONSTRUCTION_PRIORITY[c.id] || 20,
-        target: (c.reconstructs || []).filter(target => this.targetMatchesGoal(target, goal))
-      }))
+      .map(c => ({ contract: c, capability: CAPABILITY_MAP[c.id], score: RECONSTRUCTION_PRIORITY[c.id] || 20, target: (c.reconstructs || []).filter(target => this.targetMatchesGoal(target, goal)) }))
       .sort((a, b) => b.score - a.score || a.contract.id.localeCompare(b.contract.id));
   }
 
@@ -128,9 +123,7 @@ class RecoveryNavigator {
 
   selectCorroborators(ranked, minimum = 2) {
     const independent = ranked.filter(x => !x.correlatedWithSource);
-    return independent.length >= minimum
-      ? independent.slice(0, Math.max(minimum, 3))
-      : [...independent, ...ranked.filter(x => x.correlatedWithSource)].slice(0, Math.max(minimum, 3));
+    return independent.length >= minimum ? independent.slice(0, Math.max(minimum, 3)) : [...independent, ...ranked.filter(x => x.correlatedWithSource)].slice(0, Math.max(minimum, 3));
   }
 
   async firewallDecision(actor, action, detail = {}) {
@@ -139,7 +132,7 @@ class RecoveryNavigator {
   }
 
   decisionView(x) {
-    return x ? { sequence: x.sequence || null, decisionHash: x.decisionHash || null, actor: x.actor, action: x.action, allowed: x.allowed, reason: x.reason } : null;
+    return x ? { sequence: x.sequence || null, decisionHash: x.decisionHash || null, actor: x.actor, action: x.action, allowed: x.allowed, reason: x.reason, registryHash: x.registryHash || null, contractHash: x.contractHash || null } : null;
   }
 
   async plan(options = {}) {
@@ -176,11 +169,7 @@ class RecoveryNavigator {
         firewall.push(cd);
         if (!cd.allowed) blockers.push({ type: 'FIREWALL_DENIED_CORROBORATOR', actor: c.contract.id, reason: cd.reason, decisionHash: cd.decisionHash });
       }
-      for (const [actor, action, label] of [
-        ['recovery-jury','NOMINATE_CANDIDATE','jury'],
-        ['jury-promotion-gate','OPEN_PROMOTION_CEREMONY','gate'],
-        ['promotion-ceremony','AUTHORIZE_INTENT','human-authority']
-      ]) {
+      for (const [actor, action, label] of [['recovery-jury','NOMINATE_CANDIDATE','jury'],['jury-promotion-gate','OPEN_PROMOTION_CEREMONY','gate'],['promotion-ceremony','AUTHORIZE_INTENT','human-authority']]) {
         const d2 = await this.firewallDecision(actor, action, { goal });
         firewall.push(d2);
         if (!d2.allowed) blockers.push({ type: 'FIREWALL_DENIED_REQUIRED_PHASE', phase: label, actor, reason: d2.reason, decisionHash: d2.decisionHash });
@@ -192,12 +181,7 @@ class RecoveryNavigator {
     if (terminalDenial.allowed) blockers.push({ type: 'CRITICAL_FIREWALL_FAILURE_AUTOMATIC_PROMOTION_ALLOWED', decisionHash: terminalDenial.decisionHash });
 
     const findDecision = (actor, action) => firewall.find(x => x.actor === actor && x.action === action);
-    const steps = [{
-      phase: 0, name: 'PRESERVE_EVIDENCE', authority: 'automatic-safe',
-      action: 'Clone or copy all surviving evidence before any repair attempt; never mutate the sole surviving copy.',
-      firewallDecision: this.decisionView(findDecision('recovery-navigator','PRESERVE_EVIDENCE'))
-    }];
-
+    const steps = [{ phase: 0, name: 'PRESERVE_EVIDENCE', authority: 'automatic-safe', action: 'Clone or copy all surviving evidence before any repair attempt; never mutate the sole surviving copy.', firewallDecision: this.decisionView(findDecision('recovery-navigator','PRESERVE_EVIDENCE')) }];
     if (source) {
       steps.push({ phase: 1, name: 'RECONSTRUCT_SANDBOX', authority: 'sandbox-only', source: source.contract.id, capability: source.capability, reconstructs: source.target, action: RECOVERY_HINTS[source.contract.id] || `Use ${source.contract.id} to reconstruct only into an isolated sandbox.`, forbidden: source.contract.forbidden, firewallDecision: this.decisionView(findDecision(source.contract.id,'RECONSTRUCT_SANDBOX')) });
       steps.push({ phase: 2, name: 'CANONICALIZE_CANDIDATE', authority: 'read-only-evidence', action: 'Run independent canonicalization quorum over the sandbox and record its semantic world hash. Divergence blocks promotion.' });
@@ -209,7 +193,7 @@ class RecoveryNavigator {
     }
 
     const plan = {
-      format: 'JSONDB-RECOVERY-NAVIGATOR-2',
+      format: 'JSONDB-RECOVERY-NAVIGATOR-3',
       id: `${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
       at: now(), goal,
       status: blockers.length ? 'BLOCKED' : 'PLAN_READY',
@@ -239,10 +223,28 @@ class RecoveryNavigator {
     const authoritySafe = plan.authority?.writesCanonicalState === false && plan.authority?.automaticCanonicalPromotion === false;
     const terminal = [...(plan.firewall || [])].reverse().find(x => x.action === 'PROMOTE_CANONICAL');
     const terminalPromotionDenied = Boolean(terminal && terminal.allowed === false);
-    const currentContracts = await this.k.recoveryContracts.init().catch(() => null);
-    const contractRegistryMatches = Boolean(currentContracts?.registryHash && currentContracts.registryHash === plan.contractRegistryHash);
-    const firewallLedger = this.k.authorityFirewall ? await this.k.authorityFirewall.verifyLedger().catch(error => ({ valid: false, error: error.message })) : { valid: true };
-    return { valid: computed === plan.planHash && authoritySafe && terminalPromotionDenied && contractRegistryMatches && firewallLedger.valid === true, id: plan.id, goal: plan.goal, status: plan.status, expectedPlanHash: plan.planHash, computedPlanHash: computed, authoritySafe, terminalPromotionDenied, contractRegistryMatches, firewallLedgerValid: firewallLedger.valid, blockers: plan.blockers || [] };
+    const [historicalContracts, currentContracts, firewallLedger] = await Promise.all([
+      this.k.recoveryContracts.version(plan.contractRegistryHash).catch(() => null),
+      this.k.recoveryContracts.init().catch(() => null),
+      this.k.authorityFirewall ? this.k.authorityFirewall.verifyLedger().catch(error => ({ valid: false, error: error.message })) : Promise.resolve({ valid: true })
+    ]);
+    const historicalRegistryAvailable = Boolean(historicalContracts?.registryHash && historicalContracts.registryHash === plan.contractRegistryHash);
+    const currentRegistryMatches = Boolean(currentContracts?.registryHash && currentContracts.registryHash === plan.contractRegistryHash);
+    return {
+      valid: computed === plan.planHash && authoritySafe && terminalPromotionDenied && historicalRegistryAvailable && firewallLedger.valid === true,
+      id: plan.id,
+      goal: plan.goal,
+      status: plan.status,
+      expectedPlanHash: plan.planHash,
+      computedPlanHash: computed,
+      authoritySafe,
+      terminalPromotionDenied,
+      historicalRegistryAvailable,
+      currentRegistryMatches,
+      policyDriftedSincePlan: historicalRegistryAvailable && !currentRegistryMatches,
+      firewallLedgerValid: firewallLedger.valid,
+      blockers: plan.blockers || []
+    };
   }
 }
 
