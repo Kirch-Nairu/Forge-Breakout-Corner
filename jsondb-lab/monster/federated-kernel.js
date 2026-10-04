@@ -7,6 +7,7 @@ const { HistoryCourt } = require('./historycourt');
 const { TemporalParityArchive } = require('./temporalparity');
 const { TimeWeave } = require('./timeweave');
 const { OmegaFederation } = require('./omegafederation');
+const { SemanticHologram } = require('./hologram');
 const { readJson } = require('./jsonfs');
 
 class FederatedOmegaKernel extends OmegaKernel {
@@ -24,6 +25,7 @@ class FederatedOmegaKernel extends OmegaKernel {
     });
     this.temporalParity = new TemporalParityArchive({ savior: this.savior, omegaEpochRoot: this.epochSealer.root });
     this.timeWeave = new TimeWeave({ savior: this.savior, omegaEpochRoot: this.epochSealer.root, polyhash: this.polyhash });
+    this.hologram = new SemanticHologram({ engine: this.engine, savior: this.savior });
     this.federation = new OmegaFederation({
       savior: this.savior,
       epochSealer: this.epochSealer,
@@ -31,7 +33,8 @@ class FederatedOmegaKernel extends OmegaKernel {
       temporalParity: this.temporalParity,
       historyCourt: this.historyCourt,
       worldTree: this.worldTree,
-      polyhash: this.polyhash
+      polyhash: this.polyhash,
+      hologram: this.hologram
     });
     this.federatedInitialized = false;
   }
@@ -39,7 +42,7 @@ class FederatedOmegaKernel extends OmegaKernel {
   async init(options = {}) {
     await super.init(options);
     if (this.federatedInitialized) return this;
-    for (const system of [this.epochSealer, this.historyCourt, this.temporalParity, this.timeWeave, this.federation]) {
+    for (const system of [this.epochSealer, this.historyCourt, this.temporalParity, this.timeWeave, this.hologram, this.federation]) {
       if (system && typeof system.init === 'function') await system.init();
     }
     this.federatedInitialized = true;
@@ -49,22 +52,24 @@ class FederatedOmegaKernel extends OmegaKernel {
   async status(options = {}) {
     await this.init();
     const base = await super.status(options);
-    const [weave, federation, latestEpoch, latestParity, latestCourt] = await Promise.all([
+    const [weave, federation, latestEpoch, latestParity, latestCourt, latestHologram] = await Promise.all([
       this.timeWeave.verifyAll().catch(error => ({ valid: false, error: error.message })),
       this.federation.verify(null, { live: false }).catch(error => ({ valid: false, status: 'ABSENT', error: error.message })),
       readJson(path.join(this.epochSealer.root, 'latest.json'), null),
       readJson(path.join(this.temporalParity.root, 'latest.json'), null),
-      readJson(path.join(this.historyCourt.root, 'latest.json'), null)
+      readJson(path.join(this.historyCourt.root, 'latest.json'), null),
+      readJson(path.join(this.hologram.root, 'latest.json'), null)
     ]);
     return {
       ...base,
-      format: 'JSONDB-FEDERATED-OMEGA-KERNEL-STATUS-1',
+      format: 'JSONDB-FEDERATED-OMEGA-KERNEL-STATUS-2',
       historicalSurvival: {
         latestOmegaEpoch: latestEpoch ? { id: latestEpoch.id, epochHash: latestEpoch.epochHash, semanticWorldSha256: latestEpoch.semanticWorldSha256 } : null,
         timeWeave: { valid: weave.valid, nodes: weave.nodes, invalidNodes: weave.invalid?.length || 0 },
         temporalParity: latestParity,
         federation: { valid: federation.valid, id: federation.id, staticValid: federation.staticValid, error: federation.error },
-        latestHistoryCourt: latestCourt ? { id: latestCourt.id, verdict: latestCourt.verdict, caseHash: latestCourt.caseHash } : null
+        latestHistoryCourt: latestCourt ? { id: latestCourt.id, verdict: latestCourt.verdict, caseHash: latestCourt.caseHash } : null,
+        semanticHologram: latestHologram ? { id: latestHologram.id, hologramHash: latestHologram.hologramHash, capturedAt: latestHologram.capturedAt } : null
       }
     };
   }
