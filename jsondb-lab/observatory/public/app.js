@@ -13,7 +13,11 @@ const titles = {
   wal: 'WAL Theater',
   data: 'Data Topology',
   index: 'Index & Sorting Lab',
-  recovery: 'Recovery Constellation'
+  history: 'OMEGA History',
+  recovery: 'Recovery Constellation',
+  authority: 'Authority Cockpit',
+  files: 'Artifact Explorer',
+  lab: 'Failure Lab'
 };
 
 const familyColors = {
@@ -352,16 +356,7 @@ function connectEvents() {
   source.onopen = () => connection('online', 'LIVE STREAM');
 }
 
-function attachIndexLabStyles() {
-  if (document.querySelector('link[href="/index-lab.css"]')) return;
-  const link = document.createElement('link');
-  link.rel = 'stylesheet';
-  link.href = '/index-lab.css';
-  document.head.appendChild(link);
-}
-
 function init() {
-  attachIndexLabStyles();
   setupNavigation();
   state.visualizers.push(new FlowVisualizer('overview-flow-stage', 'overview-flow-canvas'));
   state.visualizers.push(new FlowVisualizer('flow-stage', 'flow-canvas'));
