@@ -55,7 +55,12 @@ class SemanticDeltaFossils{
     return out;
   }
 
-  async memoryWorld(id){const v=await this.memory.verify(id,{repairPrimary:true});if(!v.valid||!v._buffer)throw new Error(`Memory Palace endpoint unavailable: ${id} (${v.status})`);return JSON.parse(v._buffer.toString('utf8'));}
+  async memoryWorld(id,options={}){
+    const readOnly=options.readOnly===true;
+    const v=await this.memory.verify(id,{repairPrimary:!readOnly,readOnly});
+    if(!v.valid||!v._buffer)throw new Error(`Memory Palace endpoint unavailable: ${id} (${v.status})`);
+    return JSON.parse(v._buffer.toString('utf8'));
+  }
 
   previousEndpoint(record){
     if(!record)return null;
@@ -89,20 +94,21 @@ class SemanticDeltaFossils{
     await atomicJson(path.join(this.records,`${record.id}.json`),record);await atomicJson(path.join(this.root,'latest.json'),record);return record;
   }
 
-  async verify(id=null){
-    await this.init();
+  async verify(id=null,options={}){
+    const readOnly=options.readOnly===true;
+    if(!readOnly)await this.init();
     const record=id?await readJson(path.join(this.records,`${id}.json`),null):await readJson(path.join(this.root,'latest.json'),null);
-    if(!record)return{valid:false,status:'ABSENT'};
-    if(record.format==='JSONDB-SEMANTIC-FOSSIL-GENESIS-1')return{valid:true,status:'GENESIS',record};
+    if(!record)return{valid:false,status:'ABSENT',readOnly};
+    if(record.format==='JSONDB-SEMANTIC-FOSSIL-GENESIS-1')return{valid:true,status:'GENESIS',readOnly,record};
     const copy={...record};delete copy.fossilHash;const staticValid=hash(copy)===record.fossilHash;
     const forwardHash=hash(this.patchView(record.changes||[],'forward')),inverseHash=hash(this.patchView(record.changes||[],'inverse'));
-    const [before,after]=await Promise.all([this.memoryWorld(record.from.memoryId),this.memoryWorld(record.to.memoryId)]);
+    const [before,after]=await Promise.all([this.memoryWorld(record.from.memoryId,{readOnly}),this.memoryWorld(record.to.memoryId,{readOnly})]);
     const forwardWorld=this.apply(before,record.changes||[],'forward'),inverseWorld=this.apply(after,record.changes||[],'inverse');
     const forwardWorldHash=hash(forwardWorld),inverseWorldHash=hash(inverseWorld),expectedAfterHash=hash(after),expectedBeforeHash=hash(before);
     return{
-      format:'JSONDB-SEMANTIC-DELTA-FOSSIL-VERIFY-2',id:record.id,
+      format:'JSONDB-SEMANTIC-DELTA-FOSSIL-VERIFY-3',id:record.id,
       valid:staticValid&&forwardHash===record.forwardPatchHash&&inverseHash===record.inversePatchHash&&forwardWorldHash===expectedAfterHash&&inverseWorldHash===expectedBeforeHash,
-      staticValid,
+      readOnly,staticValid,
       forward:{patchHashValid:forwardHash===record.forwardPatchHash,reconstructedWorldHash:forwardWorldHash,expectedWorldHash:expectedAfterHash,valid:forwardWorldHash===expectedAfterHash},
       inverse:{patchHashValid:inverseHash===record.inversePatchHash,reconstructedWorldHash:inverseWorldHash,expectedWorldHash:expectedBeforeHash,valid:inverseWorldHash===expectedBeforeHash},
       endpoints:{from:record.from,to:record.to},changeCount:record.changeCount,parentFossil:record.parentFossil||null
