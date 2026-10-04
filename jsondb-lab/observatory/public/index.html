@@ -21,7 +21,8 @@
         <button class="nav-item" data-view="flow"><span>02</span>Flow</button>
         <button class="nav-item" data-view="wal"><span>03</span>WAL</button>
         <button class="nav-item" data-view="data"><span>04</span>Data</button>
-        <button class="nav-item" data-view="recovery"><span>05</span>Recovery</button>
+        <button class="nav-item" data-view="index"><span>05</span>Index Lab</button>
+        <button class="nav-item" data-view="recovery"><span>06</span>Recovery</button>
       </nav>
       <div class="rail-foot">
         <div class="live-row"><span class="live-dot"></span><span>LIVE</span></div>
@@ -133,6 +134,74 @@
         </article>
       </section>
 
+      <section class="view" id="view-index">
+        <div class="index-truth-banner">
+          <div><span class="kicker">ENGINE TRUTH</span><strong>HASH MAP INDEX</strong></div>
+          <p>The persisted MONSTER index is bucket-based. The left theater replays that real structure. The sorting theater is explicitly browser-only explanation using real rows.</p>
+          <span class="truth-badge">NO FAKE TRACE</span>
+        </div>
+
+        <article class="panel index-controls-panel">
+          <div class="panel-head">
+            <div><span class="kicker">INDEX SOURCE</span><h2>Choose the live collection</h2></div>
+            <span class="tag" id="index-live-state">WAITING</span>
+          </div>
+          <div class="control-grid">
+            <label><span>Collection</span><select id="index-collection"></select></label>
+            <label><span>Persisted index</span><select id="index-name"></select></label>
+            <button class="ghost control-button" id="index-reload">Reload artifact</button>
+          </div>
+          <div class="index-source-facts">
+            <span>Built <b id="index-built-at">—</b></span>
+            <span>TX <b id="index-tx">0</b></span>
+            <span>Rows <b id="index-row-count">0</b></span>
+            <span>Distinct buckets <b id="index-distinct">0</b></span>
+          </div>
+        </article>
+
+        <div class="index-lab-grid">
+          <article class="panel actual-index-panel">
+            <div class="panel-head">
+              <div><span class="kicker">STRUCTURE REPLAY</span><h2>Actual hash-bucket build</h2></div>
+              <button class="ghost" id="index-play">▶ Replay build</button>
+            </div>
+            <p class="muted">Replays the engine's real build rule against current row order: encode configured field value(s) → bucket key → append row ID. This is a reconstruction of the documented build semantics, not a timestamped runtime trace.</p>
+            <div class="index-replay-status"><code id="index-replay-status">Select an index.</code></div>
+            <div class="index-theater">
+              <div class="index-row-source">
+                <span class="lane-title">CURRENT ROW ORDER</span>
+                <div id="index-row-lane" class="index-row-lane"></div>
+              </div>
+              <div class="bucket-source">
+                <span class="lane-title">PERSISTED HASH BUCKETS</span>
+                <div id="index-bucket-grid" class="index-bucket-grid"></div>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel sort-panel">
+            <div class="panel-head">
+              <div><span class="kicker">EXPLAIN MODE</span><h2>Sorting theater</h2></div>
+              <span class="tag explain-tag">BROWSER MEMORY ONLY</span>
+            </div>
+            <p class="muted">The engine does not sort to build its hash index. This lab copies the observed rows into browser memory so you can watch comparison algorithms without touching JSONDB.</p>
+            <div class="sort-controls">
+              <label><span>Field</span><select id="sort-field"></select></label>
+              <label><span>Algorithm</span><select id="sort-algorithm"><option value="insertion">Insertion sort</option><option value="bubble">Bubble sort</option><option value="selection">Selection sort</option></select></label>
+              <label><span>Speed</span><select id="sort-speed"><option value="900">0.5×</option><option value="420" selected>1×</option><option value="180">2×</option><option value="65">6×</option></select></label>
+              <button class="ghost" id="sort-play">▶ Play</button>
+              <button class="ghost" id="sort-reset">Reset</button>
+            </div>
+            <div class="sort-metrics">
+              <span>Comparisons <b id="sort-comparisons">0</b></span>
+              <span>Moves / swaps <b id="sort-moves">0</b></span>
+              <span>Status <b id="sort-status">READY</b></span>
+            </div>
+            <div id="sort-stage" class="sort-stage"><div class="empty">Choose a sortable field.</div></div>
+          </article>
+        </div>
+      </section>
+
       <section class="view" id="view-recovery">
         <div class="recovery-grid">
           <article class="panel recovery-orbit">
@@ -161,6 +230,7 @@
       </section>
     </main>
   </div>
+  <script src="/index-lab.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>
