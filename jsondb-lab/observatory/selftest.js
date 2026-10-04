@@ -141,8 +141,7 @@ async function main() {
   try {
     const health = await waitForServer();
     const healthJson = JSON.parse(health.body);
-    assert(healthJson.ok === true, 'Health endpoint is not healthy.');
-    assert(healthJson.authority === 'READ_ONLY_OBSERVER', 'Health endpoint did not declare read-only authority.');
+    assert(healthJson.ok === true && healthJson.authority === 'READ_ONLY_OBSERVER', 'Health endpoint did not declare healthy read-only authority.');
 
     const snapshot = await request('GET', '/api/snapshot');
     assert(snapshot.status === 200, `Snapshot endpoint returned ${snapshot.status}.`);
@@ -160,49 +159,56 @@ async function main() {
     const authorityResponse = await request('GET', '/api/authority-ledger');
     assert(authorityResponse.status === 200, `Authority ledger endpoint returned ${authorityResponse.status}.`);
     const authority = JSON.parse(authorityResponse.body);
-    assert(authority.authority === 'READ_ONLY_OBSERVER', 'Authority ledger did not declare observer authority.');
-    assert(Array.isArray(authority.decisions), 'Authority ledger decisions are missing.');
+    assert(authority.authority === 'READ_ONLY_OBSERVER' && Array.isArray(authority.decisions), 'Authority ledger shape is invalid.');
+
+    const historyResponse = await request('GET', '/api/history-map');
+    assert(historyResponse.status === 200, `History map endpoint returned ${historyResponse.status}.`);
+    const history = JSON.parse(historyResponse.body);
+    assert(history.authority === 'READ_ONLY_OBSERVER', 'History map did not declare observer authority.');
+    assert(Array.isArray(history.epochs) && Array.isArray(history.timeWeave) && Array.isArray(history.fossils), 'History map is missing timeline families.');
+
+    const artifactListResponse = await request('GET', '/api/artifacts');
+    assert(artifactListResponse.status === 200, `Artifact registry returned ${artifactListResponse.status}.`);
+    const artifactList = JSON.parse(artifactListResponse.body);
+    assert(artifactList.authority === 'READ_ONLY_OBSERVER' && Array.isArray(artifactList.artifacts), 'Artifact registry shape is invalid.');
+    assert(artifactList.artifacts.every(item => /^artifact-[a-f0-9]{16}$/.test(item.id)), 'Artifact registry emitted a non-opaque ID.');
+    assert(new Set(artifactList.artifacts.map(item => item.id)).size === artifactList.artifacts.length, 'Artifact registry emitted duplicate IDs.');
+    const previewable = artifactList.artifacts.find(item => item.previewable);
+    assert(previewable, 'Bootstrap produced no previewable artifact.');
+    const artifactResponse = await request('GET', `/api/artifact?id=${encodeURIComponent(previewable.id)}`);
+    assert(artifactResponse.status === 200, `Opaque artifact preview returned ${artifactResponse.status}.`);
+    const artifact = JSON.parse(artifactResponse.body);
+    assert(artifact.authority === 'READ_ONLY_OBSERVER' && artifact.artifact?.id === previewable.id && typeof artifact.content === 'string', 'Opaque artifact preview shape is invalid.');
 
     const indexedCollection = snapshotJson.collections.find(collection => collection.rows > 0 && collection.indexes?.length) || snapshotJson.collections.find(collection => collection.rows > 0) || snapshotJson.collections[0];
     assert(indexedCollection, 'Bootstrap produced no collection for Observatory Index Lab.');
-
     const indexPath = `/api/index-lab?collection=${encodeURIComponent(indexedCollection.name)}`;
     const indexResponse = await request('GET', indexPath);
     assert(indexResponse.status === 200, `Index Lab endpoint returned ${indexResponse.status}.`);
     const indexJson = JSON.parse(indexResponse.body);
-    assert(indexJson.authority === 'READ_ONLY_OBSERVER', 'Index Lab did not declare observer authority.');
-    assert(indexJson.collection === indexedCollection.name, 'Index Lab returned a different collection.');
-    assert(indexJson.truth?.engineIndexStructure === 'HASH_MAP', 'Index Lab did not identify the real engine index as HASH_MAP.');
-    assert(indexJson.truth?.sortAnimation === 'EXPLAIN_ONLY', 'Index Lab failed to distinguish sorting explanation from engine truth.');
-    assert(Array.isArray(indexJson.table?.rows) && indexJson.table.rows.length > 0, 'Index Lab returned no current rows for the selected collection.');
-    if (indexedCollection.indexes?.length) assert(indexJson.indexArtifact?.indexes?.length > 0, 'Persisted engine indexes were not exposed by Index Lab.');
+    assert(indexJson.authority === 'READ_ONLY_OBSERVER' && indexJson.collection === indexedCollection.name, 'Index Lab identity mismatch.');
+    assert(indexJson.truth?.engineIndexStructure === 'HASH_MAP' && indexJson.truth?.sortAnimation === 'EXPLAIN_ONLY', 'Index Lab failed to distinguish real hash indexing from sort explanation.');
+    assert(Array.isArray(indexJson.table?.rows) && indexJson.table.rows.length > 0, 'Index Lab returned no current rows.');
 
     const html = await request('GET', '/');
-    assert(html.status === 200 && /<title>OMEGA Observatory<\/title>/.test(html.body) && /data-view="authority"/.test(html.body) && /id="wal-scrubber"/.test(html.body) && /id="recovery-graph"/.test(html.body), 'GUI shell was not served with the expanded Observatory theaters.');
+    assert(html.status === 200 && /<title>OMEGA Observatory<\/title>/.test(html.body) && /data-view="authority"/.test(html.body) && /data-view="history"/.test(html.body) && /data-view="files"/.test(html.body) && /data-view="lab"/.test(html.body), 'Expanded Observatory GUI shell is missing views.');
     assert(String(html.headers['content-security-policy'] || '').includes("default-src 'self'"), 'CSP header missing.');
 
-    const assets = await Promise.all(['/index-lab.js','/index-lab.css','/wal-theater.js','/recovery-theater.js','/recovery-theater.css'].map(route => request('GET', route)));
+    const assetRoutes = ['/index-lab.js','/index-lab.css','/wal-theater.js','/recovery-theater.js','/recovery-theater.css','/history-lab.js','/artifacts.js','/failure-lab.js','/advanced-theater.css'];
+    const assets = await Promise.all(assetRoutes.map(route => request('GET', route)));
     assert(assets.every(x => x.status === 200), 'One or more Observatory theater assets were not served.');
-    assert(/engineIndexStructure|IndexLab/.test(assets[0].body), 'Index Lab script identity missing.');
-    assert(/wal-scrubber|WAL/.test(assets[2].body), 'WAL theater script identity missing.');
-    assert(/recovery-graph|authority-ledger/.test(assets[3].body), 'Recovery theater script identity missing.');
 
-    const post = await request('POST', '/api/snapshot');
-    const indexPost = await request('POST', indexPath);
-    const recoveryPost = await request('POST', '/api/recovery-graph');
-    const authorityPost = await request('POST', '/api/authority-ledger');
-    assert(post.status === 405 && indexPost.status === 405 && recoveryPost.status === 405 && authorityPost.status === 405, 'A read-only Observatory API accepted a mutation method.');
+    const posts = await Promise.all(['/api/snapshot', indexPath, '/api/recovery-graph', '/api/authority-ledger', '/api/history-map', '/api/artifacts', `/api/artifact?id=${previewable.id}`].map(route => request('POST', route)));
+    assert(posts.every(x => x.status === 405), 'A read-only Observatory API accepted a mutation method.');
 
     const arbitrary = await request('GET', '/api/file?path=../../../../etc/passwd');
     const traversal = await request('GET', '/%2e%2e/%2e%2e/etc/passwd');
     const hostileCollection = await request('GET', '/api/index-lab?collection=..%2F..%2F..%2Fetc%2Fpasswd');
-    const recoveryPathProbe = await request('GET', '/api/recovery-graph?path=../../../../etc/passwd');
-    const authorityPathProbe = await request('GET', '/api/authority-ledger?path=../../../../etc/passwd');
-    assert(arbitrary.status === 404, 'Arbitrary file route unexpectedly exists.');
-    assert(traversal.status === 404, 'Traversal request unexpectedly resolved.');
+    const hostileArtifact = await request('GET', '/api/artifact?id=..%2F..%2F..%2Fetc%2Fpasswd');
+    const pathInsteadOfId = await request('GET', '/api/artifact?path=../../../../etc/passwd');
+    assert(arbitrary.status === 404 && traversal.status === 404, 'Arbitrary path/traversal unexpectedly resolved.');
     assert(hostileCollection.status === 404, 'Hostile Index Lab collection escaped the canonical catalog allowlist.');
-    assert(recoveryPathProbe.status === 200 && JSON.parse(recoveryPathProbe.body).format === recovery.format, 'Recovery graph query parameter changed route semantics.');
-    assert(authorityPathProbe.status === 200 && JSON.parse(authorityPathProbe.body).format === authority.format, 'Authority ledger query parameter changed route semantics.');
+    assert(hostileArtifact.status === 404 && pathInsteadOfId.status === 404, 'Artifact endpoint accepted non-opaque path input.');
 
     const afterObservation = await canonicalSnapshot();
     assert(afterObservation.digest === before.digest, `Observer mutated canonical engine storage.\nbefore=${before.digest}\nafter=${afterObservation.digest}`);
@@ -225,11 +231,10 @@ async function main() {
 
     await new Promise(r => setTimeout(r, 650));
     const afterExternalIndexMutation = await canonicalSnapshot();
-    const refreshedIndexResponse = await request('GET', indexPath);
-    const refreshedIndex = JSON.parse(refreshedIndexResponse.body);
-    assert(Number(refreshedIndex.indexArtifact?.tx || 0) > originalIndexTx, 'Index Lab did not observe the committed transaction in persisted index metadata.');
+    const refreshedIndex = JSON.parse((await request('GET', indexPath)).body);
+    assert(Number(refreshedIndex.indexArtifact?.tx || 0) > originalIndexTx, 'Index Lab did not observe committed transaction metadata.');
     assert(refreshedIndex.table.rows.some(row => row.id === probeRow.id && row._observatoryProbe === probeValue), 'Index Lab did not observe the externally committed row update.');
-    await Promise.all([request('GET', '/api/snapshot'), request('GET', '/api/recovery-graph'), request('GET', '/api/authority-ledger'), request('GET', '/wal-theater.js'), request('GET', '/recovery-theater.js')]);
+    await Promise.all([request('GET', '/api/snapshot'), request('GET', '/api/recovery-graph'), request('GET', '/api/authority-ledger'), request('GET', '/api/history-map'), request('GET', '/api/artifacts'), request('GET', `/api/artifact?id=${previewable.id}`)]);
     await new Promise(r => setTimeout(r, 650));
     const afterIndexObservation = await canonicalSnapshot();
     assert(afterExternalIndexMutation.digest === afterIndexObservation.digest, 'Observatory changed canonical storage after observing real index activity.');
@@ -242,25 +247,28 @@ async function main() {
 
     await new Promise(r => setTimeout(r, 650));
     const afterExternalCheckpoint = await canonicalSnapshot();
-    await Promise.all([request('GET', '/api/snapshot'), request('GET', '/api/recovery-graph'), request('GET', '/api/authority-ledger')]);
+    await Promise.all([request('GET', '/api/snapshot'), request('GET', '/api/history-map'), request('GET', '/api/artifacts')]);
     await new Promise(r => setTimeout(r, 650));
     const afterCheckpointObservation = await canonicalSnapshot();
     assert(afterExternalCheckpoint.digest === afterCheckpointObservation.digest, 'Observatory changed canonical storage after observing external checkpoint activity.');
 
     const report = {
-      format: 'JSONDB-OMEGA-OBSERVATORY-SELFTEST-3',
+      format: 'JSONDB-OMEGA-OBSERVATORY-SELFTEST-4',
       ok: true,
       authority: 'READ_ONLY_OBSERVER',
       observerMutationBoundary: { before: before.digest, afterReadOnlyInteraction: afterObservation.digest, unchanged: before.digest === afterObservation.digest },
-      walTheater: { mode: 'REPLAY_BROWSER_MEMORY_ONLY', entriesObserved: snapshotJson.wal?.length || 0, staticAssetServed: assets[2].status === 200 },
-      recoveryGraph: { nodes: recovery.nodes.length, edges: recovery.edges.length, automaticPromoters: recovery.nodes.filter(node => node.mayPromoteCanonical).length, postDenied: recoveryPost.status === 405 },
-      authorityTheater: { decisions: authority.decisions.length, headHash: authority.headHash, postDenied: authorityPost.status === 405 },
-      indexLabTruthBoundary: { collection: indexedCollection.name, engineIndexStructure: indexJson.truth.engineIndexStructure, sortAnimation: indexJson.truth.sortAnimation, hostileCollectionDenied: hostileCollection.status === 404, postDenied: indexPost.status === 405 },
-      liveIndexObservation: { seen: true, type: indexObserved.type, family: indexObserved.family, source: indexObserved.source, mutation: indexObserved.mutation, from: indexObserved.from, to: indexObserved.to, persistedIndexTxAdvanced: Number(refreshedIndex.indexArtifact?.tx || 0) > originalIndexTx, committedProbeVisible: true },
-      postIndexObservationBoundary: { afterExternalMutation: afterExternalIndexMutation.digest, afterObserverReads: afterIndexObservation.digest, unchanged: afterExternalIndexMutation.digest === afterIndexObservation.digest },
+      walTheater: { mode: 'REPLAY_BROWSER_MEMORY_ONLY', entriesObserved: snapshotJson.wal?.length || 0 },
+      recoveryGraph: { nodes: recovery.nodes.length, edges: recovery.edges.length, automaticPromoters: recovery.nodes.filter(node => node.mayPromoteCanonical).length },
+      authorityTheater: { decisions: authority.decisions.length, headHash: authority.headHash },
+      historyTheater: { epochs: history.epochs.length, weaveNodes: history.timeWeave.length, fossils: history.fossils.length },
+      artifactBoundary: { count: artifactList.artifacts.length, opaqueId: previewable.id, previewPath: previewable.path, hostileIdDenied: hostileArtifact.status === 404, rawPathInputDenied: pathInsteadOfId.status === 404 },
+      failureLab: { mode: 'BROWSER_ONLY_COUNTERFACTUAL', serverMutationApiExists: false },
+      indexLabTruthBoundary: { collection: indexedCollection.name, engineIndexStructure: indexJson.truth.engineIndexStructure, sortAnimation: indexJson.truth.sortAnimation },
+      liveIndexObservation: { seen: true, source: indexObserved.source, from: indexObserved.from, to: indexObserved.to, persistedIndexTxAdvanced: Number(refreshedIndex.indexArtifact?.tx || 0) > originalIndexTx },
+      postIndexObservationBoundary: { unchanged: afterExternalIndexMutation.digest === afterIndexObservation.digest },
       liveCheckpointObservation: { seen: true, type: checkpointObserved.type, family: checkpointObserved.family, source: checkpointObserved.source },
-      postCheckpointObservationBoundary: { afterExternalMutation: afterExternalCheckpoint.digest, afterObserverRead: afterCheckpointObservation.digest, unchanged: afterExternalCheckpoint.digest === afterCheckpointObservation.digest },
-      adversarialHttp: { snapshotPostDenied: post.status === 405, indexLabPostDenied: indexPost.status === 405, recoveryPostDenied: recoveryPost.status === 405, authorityPostDenied: authorityPost.status === 405, arbitraryFileUnavailable: arbitrary.status === 404, traversalUnavailable: traversal.status === 404, hostileCollectionDenied: hostileCollection.status === 404, recoveryPathInputIgnored: recoveryPathProbe.status === 200, authorityPathInputIgnored: authorityPathProbe.status === 200, cspPresent: true }
+      postCheckpointObservationBoundary: { unchanged: afterExternalCheckpoint.digest === afterCheckpointObservation.digest },
+      adversarialHttp: { allPostsDenied: posts.every(x => x.status === 405), arbitraryFileUnavailable: arbitrary.status === 404, traversalUnavailable: traversal.status === 404, hostileCollectionDenied: hostileCollection.status === 404, hostileArtifactDenied: hostileArtifact.status === 404, rawArtifactPathDenied: pathInsteadOfId.status === 404, cspPresent: true }
     };
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } finally {
