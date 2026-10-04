@@ -12,6 +12,7 @@ const { EvidenceDiaspora } = require('./evidencediaspora');
 const { QuaternaryColdCodec } = require('./quaternary');
 const { RosettaCapsule } = require('./rosetta');
 const { ShadowLawEngine } = require('./shadowlaws');
+const { ForwardWitnessRatchet } = require('./forwardwitness');
 const { LastSaviorArchive } = require('./lastsavior');
 const { RecoveryJury } = require('./recoveryjury');
 const { JuryPromotionGate } = require('./jurygate');
@@ -37,6 +38,7 @@ class FederatedOmegaKernel extends OmegaKernel {
     this.quaternary = new QuaternaryColdCodec({ savior: this.savior });
     this.rosetta = new RosettaCapsule({ savior: this.savior, polyhash: this.polyhash });
     this.shadowLaws = new ShadowLawEngine({ engine: this.engine, savior: this.savior, cryptoCouncil: this.cryptoCouncil });
+    this.forwardWitness = new ForwardWitnessRatchet(this.savior);
     this.federation = new OmegaFederation({
       savior: this.savior,
       epochSealer: this.epochSealer,
@@ -56,7 +58,7 @@ class FederatedOmegaKernel extends OmegaKernel {
   async init(options = {}) {
     await super.init(options);
     if (this.federatedInitialized) return this;
-    for (const system of [this.epochSealer, this.historyCourt, this.temporalParity, this.timeWeave, this.hologram, this.diaspora, this.quaternary, this.rosetta, this.shadowLaws, this.federation, this.lastSavior, this.recoveryJury, this.juryGate]) {
+    for (const system of [this.epochSealer, this.historyCourt, this.temporalParity, this.timeWeave, this.hologram, this.diaspora, this.quaternary, this.rosetta, this.shadowLaws, this.forwardWitness, this.federation, this.lastSavior, this.recoveryJury, this.juryGate]) {
       if (system && typeof system.init === 'function') await system.init();
     }
     this.federatedInitialized = true;
@@ -71,7 +73,7 @@ class FederatedOmegaKernel extends OmegaKernel {
   async status(options = {}) {
     await this.init();
     const base = await super.status(options);
-    const [weave, federation, latestEpoch, latestParity, latestCourt, latestHologram, latestDiaspora, latestQuaternary, latestRosetta, latestShadowLaws, latestLastSavior, latestJury, latestWarrant] = await Promise.all([
+    const [weave, federation, latestEpoch, latestParity, latestCourt, latestHologram, latestDiaspora, latestQuaternary, latestRosetta, latestShadowLaws, forwardWitness, latestLastSavior, latestJury, latestWarrant] = await Promise.all([
       this.timeWeave.verifyAll().catch(error => ({ valid: false, error: error.message })),
       this.federation.verify(null, { live: false }).catch(error => ({ valid: false, status: 'ABSENT', error: error.message })),
       readJson(path.join(this.epochSealer.root, 'latest.json'), null),
@@ -82,13 +84,14 @@ class FederatedOmegaKernel extends OmegaKernel {
       readJson(path.join(this.quaternary.root, 'latest.json'), null),
       readJson(path.join(this.rosetta.root, 'latest.json'), null),
       readJson(path.join(this.shadowLaws.root, 'latest.json'), null),
+      this.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
       readJson(path.join(this.lastSavior.root, 'latest.json'), null),
       readJson(path.join(this.recoveryJury.root, 'latest.json'), null),
       readJson(path.join(this.juryGate.root, 'latest.json'), null)
     ]);
     return {
       ...base,
-      format: 'JSONDB-FEDERATED-OMEGA-KERNEL-STATUS-7',
+      format: 'JSONDB-FEDERATED-OMEGA-KERNEL-STATUS-8',
       historicalSurvival: {
         latestOmegaEpoch: latestEpoch ? { id: latestEpoch.id, epochHash: latestEpoch.epochHash, semanticWorldSha256: latestEpoch.semanticWorldSha256 } : null,
         timeWeave: { valid: weave.valid, nodes: weave.nodes, invalidNodes: weave.invalid?.length || 0 },
@@ -97,6 +100,7 @@ class FederatedOmegaKernel extends OmegaKernel {
         latestHistoryCourt: latestCourt ? { id: latestCourt.id, verdict: latestCourt.verdict, caseHash: latestCourt.caseHash } : null,
         semanticHologram: latestHologram ? { id: latestHologram.id, hologramHash: latestHologram.hologramHash, capturedAt: latestHologram.capturedAt } : null,
         shadowLaws: latestShadowLaws ? { id: latestShadowLaws.id, recordHash: latestShadowLaws.recordHash, createdAt: latestShadowLaws.createdAt } : null,
+        forwardWitness: { valid: forwardWitness.valid, records: forwardWitness.records, headHash: forwardWitness.headHash, caveat: forwardWitness.caveat },
         evidenceDiaspora: latestDiaspora ? { id: latestDiaspora.id, validCopies: latestDiaspora.validCopies, distinctDeviceKeys: latestDiaspora.distinctDeviceKeys, apparentIndependenceRatio: latestDiaspora.apparentIndependenceRatio } : null,
         quaternaryColdCodec: latestQuaternary,
         rosettaCapsule: latestRosetta,
