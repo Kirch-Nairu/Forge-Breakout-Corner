@@ -20,10 +20,15 @@ class EvidenceDiaspora {
 
   async init() { await ensureDir(this.bundles); await ensureDir(this.receipts); await this.constellation.init(); }
 
-  async manifest(dir) {
+  async manifest(dir, options = {}) {
+    const excluded = new Set((options.exclude || []).map(x => String(x).split(path.sep).join('/')));
     const files = await listFilesRecursive(dir);
     const entries = [];
-    for (const file of files) entries.push({ path: path.relative(dir, file).split(path.sep).join('/'), sha256: await hashFile(file), bytes: (await fsp.stat(file)).size });
+    for (const file of files) {
+      const relative = path.relative(dir, file).split(path.sep).join('/');
+      if (excluded.has(relative)) continue;
+      entries.push({ path: relative, sha256: await hashFile(file), bytes: (await fsp.stat(file)).size });
+    }
     entries.sort((a,b)=>a.path.localeCompare(b.path));
     return { files: entries.length, bytes: entries.reduce((n,x)=>n+x.bytes,0), merkleRoot: merkleRoot(entries.map(x=>x.sha256)), entries };
   }
@@ -59,6 +64,64 @@ class EvidenceDiaspora {
     await atomicJson(path.join(dir, 'BUNDLE-MANIFEST.json'), record);
     await atomicJson(path.join(this.root, 'latest-bundle.json'), { id, directory: dir, merkleRoot: manifest.merkleRoot, bundleHash: record.bundleHash });
     return record;
+  }
+
+  async verifyBundle(id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
+    const latest = id
+      ? { id, directory: path.join(this.bundles, id) }
+      : await readJson(path.join(this.root, 'latest-bundle.json'), null);
+    if (!latest?.id) return { valid: false, status: 'ABSENT', readOnly };
+
+    const directory = latest.directory || path.join(this.bundles, latest.id);
+    const record = await readJson(path.join(directory, 'BUNDLE-MANIFEST.json'), null);
+    if (!record) return { valid: false, status: 'MANIFEST_ABSENT', readOnly, id: latest.id, directory };
+
+    const copy = { ...record };
+    delete copy.bundleHash;
+    delete copy.polyhash;
+    const computedBundleHash = digest(copy);
+    const staticValid = computedBundleHash === record.bundleHash;
+    const identityValid = record.id === latest.id;
+
+    let actualManifest = null;
+    let manifestError = null;
+    try {
+      actualManifest = await this.manifest(directory, { exclude: ['BUNDLE-MANIFEST.json'] });
+    } catch (error) {
+      manifestError = error.message;
+    }
+    const manifestValid = Boolean(actualManifest && JSON.stringify(actualManifest) === JSON.stringify(record.manifest));
+
+    let polyhash = null;
+    if (this.polyhash && record.polyhash) {
+      polyhash = await this.polyhash.verify({ ...copy, bundleHash: record.bundleHash }, record.polyhash, { readOnly })
+        .catch(error => ({ valid: false, error: error.message }));
+    }
+    const polyhashValid = !record.polyhash || Boolean(polyhash?.valid);
+
+    return {
+      format: 'JSONDB-EVIDENCE-DIASPORA-BUNDLE-VERIFY-1',
+      id: record.id,
+      requestedId: latest.id,
+      directory,
+      valid: identityValid && staticValid && manifestValid && polyhashValid,
+      readOnly,
+      identityValid,
+      staticValid,
+      manifestValid,
+      polyhashValid,
+      expectedBundleHash: record.bundleHash,
+      computedBundleHash,
+      recordedMerkleRoot: record.manifest?.merkleRoot || null,
+      computedMerkleRoot: actualManifest?.merkleRoot || null,
+      recordedFiles: record.manifest?.files ?? null,
+      computedFiles: actualManifest?.files ?? null,
+      manifestError,
+      polyhash,
+      doctrine: 'Bundle verification recomputes the sealed pre-manifest file set and never repairs, rewrites, hydrates, or normalizes evidence when read-only mode is requested.'
+    };
   }
 
   domainKey(medium) {
