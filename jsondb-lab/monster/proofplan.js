@@ -116,8 +116,8 @@ class ProofCarryingRecoveryPlan {
     const [plan, policy, crypto, forward, historicalRegistry, currentRegistry] = await Promise.all([
       this.k.recoveryNavigator.verify(dossier.navigator?.id || null, { readOnly }).catch(error => ({ valid: false, error: error.message })),
       this.k.policyCheckpoint.verify(dossier.authority?.policyCheckpoint?.id || null, { readOnly }).catch(error => ({ valid: false, error: error.message })),
-      this.k.cryptoCouncil.verify(dossier.cryptoCouncil?.id).catch(error => ({ valid: false, error: error.message })),
-      this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
+      this.k.cryptoCouncil.verify(dossier.cryptoCouncil?.id, { readOnly }).catch(error => ({ valid: false, error: error.message })),
+      this.k.forwardWitness.verifyAll({ readOnly }).catch(error => ({ valid: false, error: error.message })),
       this.k.recoveryContracts.version(dossier.contracts?.registryHash || null, { hydrate: !readOnly }).catch(() => null),
       readOnly ? this.k.recoveryContracts.inspect().catch(() => null) : this.k.recoveryContracts.init().catch(() => null)
     ]);
@@ -132,7 +132,7 @@ class ProofCarryingRecoveryPlan {
     const currentRegistryMatches = Boolean(currentRegistry?.registryHash && currentRegistry.registryHash === dossier.contracts?.registryHash);
 
     return {
-      format: 'JSONDB-PROOF-CARRYING-RECOVERY-PLAN-VERIFY-4',
+      format: 'JSONDB-PROOF-CARRYING-RECOVERY-PLAN-VERIFY-5',
       id: dossier.id,
       valid: staticValid && coreValid && plan.valid && policy.valid && cryptoValid && forwardValid && terminalDenied && historicalRegistrySafe,
       readOnly,
@@ -142,15 +142,15 @@ class ProofCarryingRecoveryPlan {
       policyCheckpointValid: policy.valid,
       cryptoCouncilValid: cryptoValid,
       forwardWitnessValid: forwardValid,
-      terminalPromotionDenied: terminalDenied,
       historicalRegistryAvailable,
       historicalRegistrySafe,
       historicalRegistryViolations: historicalValidation.violations || [],
       currentRegistryMatches,
       policyDriftedSinceDossier: historicalRegistryAvailable && !currentRegistryMatches,
+      terminalPromotionDenied: terminalDenied,
       goal: dossier.navigator?.goal,
       source: dossier.navigator?.source?.id || null,
-      doctrine: 'Proof-plan verification may traverse a freshly revalidated historical constitution and its policy evidence without hydrating or rewriting policy state.'
+      doctrine: 'Proof-plan verification traverses freshly revalidated historical policy and cryptographic evidence without creating trust material when read-only mode is requested.'
     };
   }
 }
