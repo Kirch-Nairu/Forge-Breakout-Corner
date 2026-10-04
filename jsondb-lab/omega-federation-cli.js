@@ -9,9 +9,10 @@ const kernel = new FederatedOmegaKernel(__dirname);
 function out(value) { process.stdout.write(`${JSON.stringify(value, null, 2)}\n`); }
 function flag(args, name) { return args.includes(name); }
 function nonflags(args) { return args.filter(x => !x.startsWith('--')); }
+function option(args, prefix, fallback = null) { const hit = args.find(x => x.startsWith(`${prefix}=`)); return hit ? hit.slice(prefix.length + 1) : fallback; }
 
 function usage() {
-  console.log(`JSONDB OMEGA FEDERATION CLI\n\n  status [--deep]\n\nEPOCHS\n  epoch-seal [label] [--deep-media] [--verify-archives]\n  epoch-verify [id] [--live]\n\nFEDERATION\n  federation-seal [label] [--compare=<ref>] [--merge-preview] [--window=N]\n  federation-verify [id] [--live]\n  continuity-proof <fromEpochId> [toEpochId]\n\nTIME WEAVE / FORWARD WITNESS\n  weave-verify\n  weave-proof <fromEpochId> [toEpochId]\n  forward-witness <subjectHash> [label]\n  forward-witness-verify\n\nTEMPORAL PARITY\n  parity-seal [window]\n  parity-inspect [id]\n  parity-recover [id] [--repair-in-place]\n\nHISTORY COURT\n  court <lineageA> <lineageB> [--merge-preview]\n  court-verify [id]\n\nCORROBORATION\n  shadow-capture [label] [lawsPerCollection]\n  shadow-challenge [id]\n  hologram-capture [label]\n  hologram-compare [id]\n\nRECOVERY JURY / PROMOTION GATE\n  jury <candidate-world.json> [archiveId]\n  jury-verify [juryId]\n  jury-open-promotion [juryId] [expiresMinutes]\n  jury-gate-verify [warrantId]\n\nQUATERNARY COLD STORAGE\n  quaternary-archive [label] [oligoBytes] [groupSize]\n  quaternary-recover [generation]\n  quaternary-restore <output-file> [generation]\n\nROSETTA RECOVERY SPEC\n  rosetta-create [label]\n  rosetta-verify [id]\n\nEVIDENCE DIASPORA\n  diaspora-bundle [label]\n  diaspora-scatter [bundleId] [copies]\n  diaspora-verify [placementId]\n\nLAST SAVIOR\n  last-savior [label] [--no-scatter] [--verify-archives]\n  last-savior-verify [id] [--live]\n\nNo npm. No package manager. No external database.\nHistory may be reconstructed into sandboxes; ambiguity is preserved instead of silently collapsed.\n`);
+  console.log(`JSONDB OMEGA FEDERATION CLI\n\n  status [--deep]\n\nEPOCHS\n  epoch-seal [label] [--deep-media] [--verify-archives]\n  epoch-verify [id] [--live]\n\nFEDERATION\n  federation-seal [label] [--compare=<ref>] [--merge-preview] [--window=N]\n  federation-verify [id] [--live]\n  continuity-proof <fromEpochId> [toEpochId]\n\nTIME WEAVE / FORWARD WITNESS\n  weave-verify\n  weave-proof <fromEpochId> [toEpochId]\n  forward-witness <subjectHash> [label]\n  forward-witness-verify\n\nTEMPORAL PARITY\n  parity-seal [window]\n  parity-inspect [id]\n  parity-recover [id] [--repair-in-place]\n\nSPACETIME ARK\n  spacetime-seal [label] [epochs] [dataColumns]\n  spacetime-recover [id]\n  spacetime-scatter [id] [copiesPerCell]\n\nSEMANTIC DELTA FOSSILS\n  fossil-capture [label]\n  fossil-verify [id]\n  fossil-reconstruct <id> <forward|inverse> <output-file>\n\nHISTORY COURT\n  court <lineageA> <lineageB> [--merge-preview]\n  court-verify [id]\n\nCORROBORATION\n  shadow-capture [label] [lawsPerCollection]\n  shadow-challenge [id]\n  hologram-capture [label]\n  hologram-compare [id]\n\nRECOVERY GEOMETRY / CONTRACTS / NAVIGATOR\n  geometry [--remove=capabilityA,capabilityB]\n  contracts\n  contracts-analyze\n  contracts-reset\n  navigate [--remove=capabilityA,capabilityB] [--minimum-corroborators=N]\n  navigate-verify [planId]\n\nRECOVERY JURY / PROMOTION GATE\n  jury <candidate-world.json> [archiveId]\n  jury-verify [juryId]\n  jury-open-promotion [juryId] [expiresMinutes]\n  jury-gate-verify [warrantId]\n\nQUATERNARY COLD STORAGE\n  quaternary-archive [label] [oligoBytes] [groupSize]\n  quaternary-recover [generation]\n  quaternary-restore <output-file> [generation]\n\nROSETTA RECOVERY SPEC\n  rosetta-create [label]\n  rosetta-verify [id]\n\nEVIDENCE DIASPORA\n  diaspora-bundle [label]\n  diaspora-scatter [bundleId] [copies]\n  diaspora-verify [placementId]\n\nLAST SAVIOR\n  last-savior [label] [--no-scatter] [--verify-archives]\n  last-savior-verify [id] [--live]\n\nNo npm. No package manager. No external database.\nHistory may be reconstructed into sandboxes; ambiguity is preserved instead of silently collapsed.\n`);
 }
 
 async function latestEvidenceSources() {
@@ -21,6 +22,11 @@ async function latestEvidenceSources() {
   await add('OMEGA-EPOCH.json', path.join(kernel.epochSealer.root, 'latest.json'));
   await add('TIME-WEAVE.json', path.join(kernel.timeWeave.root, 'latest.json'));
   await add('TEMPORAL-PARITY.json', path.join(kernel.temporalParity.root, 'latest.json'));
+  await add('SPACETIME-ARK.json', path.join(kernel.spacetime.root, 'latest.json'));
+  await add('SEMANTIC-FOSSIL.json', path.join(kernel.fossils.root, 'latest.json'));
+  await add('RECOVERY-GEOMETRY.json', path.join(kernel.recoveryGeometry.root, 'latest.json'));
+  await add('RECOVERY-CONTRACTS.json', kernel.recoveryContracts.file);
+  await add('RECOVERY-NAVIGATOR.json', path.join(kernel.recoveryNavigator.root, 'latest.json'));
   await add('SEMANTIC-HOLOGRAM.json', path.join(kernel.hologram.root, 'latest.json'));
   await add('SHADOW-LAWS.json', path.join(kernel.shadowLaws.root, 'latest.json'));
   await add('FORWARD-WITNESS.json', path.join(kernel.forwardWitness.root, 'latest.json'));
@@ -45,12 +51,10 @@ async function main() {
   if (cmd === 'epoch-verify') return out(await kernel.epochSealer.verify(plain[0] || null, { live: flag(args, '--live') }));
 
   if (cmd === 'federation-seal') {
-    const compareArg = args.find(x => x.startsWith('--compare='));
-    const windowArg = args.find(x => x.startsWith('--window='));
     return out(await kernel.federation.seal(plain[0] || 'federated-cli', {
-      compareLineage: compareArg ? compareArg.split('=').slice(1).join('=') : null,
+      compareLineage: option(args, '--compare'),
       previewMerge: flag(args, '--merge-preview'),
-      temporalWindow: windowArg ? Number(windowArg.split('=')[1]) : 8,
+      temporalWindow: Number(option(args, '--window', 8)),
       epoch: { deepMedia: true, verifyArchives: false }
     }));
   }
@@ -71,6 +75,14 @@ async function main() {
   }
   if (cmd === 'parity-recover') return out(await kernel.temporalParity.recover(plain[0] || null, { repairInPlace: flag(args, '--repair-in-place') }));
 
+  if (cmd === 'spacetime-seal') return out(await kernel.spacetime.seal(plain[0] || 'federated-cli', { epochs: Number(plain[1] || 8), dataColumns: Number(plain[2] || 6) }));
+  if (cmd === 'spacetime-recover') return out(await kernel.spacetime.recover(plain[0] || null));
+  if (cmd === 'spacetime-scatter') return out(await kernel.spacetime.scatter(plain[0] || null, { copiesPerCell: Number(plain[1] || 1) }));
+
+  if (cmd === 'fossil-capture') return out(await kernel.fossils.capture(plain[0] || 'federated-cli'));
+  if (cmd === 'fossil-verify') return out(await kernel.fossils.verify(plain[0] || null));
+  if (cmd === 'fossil-reconstruct') return out(await kernel.fossils.reconstruct(plain[0], plain[1] || 'forward', path.resolve(plain[2])));
+
   if (cmd === 'court') return out(await kernel.historyCourt.compare(plain[0], plain[1], { previewMerge: flag(args, '--merge-preview') }));
   if (cmd === 'court-verify') return out(await kernel.historyCourt.verify(plain[0] || null));
 
@@ -78,6 +90,16 @@ async function main() {
   if (cmd === 'shadow-challenge') return out(await kernel.shadowLaws.challenge(null, plain[0] || null));
   if (cmd === 'hologram-capture') return out(await kernel.hologram.capture(plain[0] || 'federated-cli'));
   if (cmd === 'hologram-compare') return out(await kernel.hologram.compare(null, plain[0] || null));
+
+  if (cmd === 'geometry') return out(await kernel.recoveryGeometry.analyze({ remove: String(option(args, '--remove', '')).split(',').map(x => x.trim()).filter(Boolean) }));
+  if (cmd === 'contracts') return out(await kernel.recoveryContracts.init());
+  if (cmd === 'contracts-analyze') return out(await kernel.recoveryContracts.analyze());
+  if (cmd === 'contracts-reset') return out(await kernel.recoveryContracts.reset());
+  if (cmd === 'navigate') return out(await kernel.recoveryNavigator.plan({
+    remove: String(option(args, '--remove', '')).split(',').map(x => x.trim()).filter(Boolean),
+    minimumCorroborators: Number(option(args, '--minimum-corroborators', 2))
+  }));
+  if (cmd === 'navigate-verify') return out(await kernel.recoveryNavigator.verify(plain[0] || null));
 
   if (cmd === 'jury') return out(await kernel.recoveryJury.deliberate(path.resolve(plain[0]), { archiveId: plain[1] || null }));
   if (cmd === 'jury-verify') return out(await kernel.recoveryJury.verify(plain[0] || null));
