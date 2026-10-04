@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OMEGA Observatory</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <div class="brand-mark">Ω</div>
+        <div>
+          <strong>OMEGA</strong>
+          <span>OBSERVATORY</span>
+        </div>
+      </div>
+      <nav class="nav" aria-label="Observatory sections">
+        <button class="nav-item active" data-view="overview"><span>01</span>Overview</button>
+        <button class="nav-item" data-view="flow"><span>02</span>Flow</button>
+        <button class="nav-item" data-view="wal"><span>03</span>WAL</button>
+        <button class="nav-item" data-view="data"><span>04</span>Data</button>
+        <button class="nav-item" data-view="recovery"><span>05</span>Recovery</button>
+      </nav>
+      <div class="rail-foot">
+        <div class="live-row"><span class="live-dot"></span><span>LIVE</span></div>
+        <code>127.0.0.1</code>
+        <small>READ-ONLY OBSERVER</small>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">JSONDB MONSTER // VISUAL SYSTEM STATE</p>
+          <h1 id="view-title">Control Room</h1>
+        </div>
+        <div class="top-actions">
+          <div class="latency"><span id="connection-dot"></span><span id="connection-text">CONNECTING</span></div>
+          <button id="refresh" class="ghost">Refresh snapshot</button>
+        </div>
+      </header>
+
+      <section class="view active" id="view-overview">
+        <div class="status-strip">
+          <article><span>ENGINE</span><strong id="engine-status">UNKNOWN</strong></article>
+          <article><span>SAVIOR</span><strong id="savior-mode">ABSENT</strong></article>
+          <article><span>LAST SAVIOR</span><strong id="last-savior-status">ABSENT</strong></article>
+          <article><span>CONTRACTS</span><strong id="contracts-status">ABSENT</strong></article>
+        </div>
+
+        <div class="metric-grid">
+          <article class="metric"><span>Collections</span><strong id="metric-collections">0</strong><small>canonical collections</small></article>
+          <article class="metric"><span>Rows</span><strong id="metric-rows">0</strong><small>current rows</small></article>
+          <article class="metric"><span>Current LSN</span><strong id="metric-lsn">0</strong><small>write-ahead position</small></article>
+          <article class="metric"><span>Firewall seq</span><strong id="metric-firewall">0</strong><small>authority decisions</small></article>
+        </div>
+
+        <div class="overview-grid">
+          <article class="panel flow-panel">
+            <div class="panel-head">
+              <div><span class="kicker">LIVE DATA FLOW</span><h2>Engine bloodstream</h2></div>
+              <span class="tag">OBSERVED</span>
+            </div>
+            <div class="flow-stage compact" id="overview-flow-stage">
+              <canvas id="overview-flow-canvas"></canvas>
+              <div class="flow-node" data-node="app"><b>APP</b><small>intent</small></div>
+              <div class="flow-node" data-node="tx"><b>TX</b><small>transaction</small></div>
+              <div class="flow-node" data-node="wal"><b>WAL</b><small>durability</small></div>
+              <div class="flow-node" data-node="current"><b>CURRENT</b><small>state</small></div>
+              <div class="flow-node" data-node="index"><b>INDEX</b><small>lookup</small></div>
+              <div class="flow-node" data-node="history"><b>HISTORY</b><small>time</small></div>
+              <div class="flow-node" data-node="savior"><b>SAVIOR</b><small>survival</small></div>
+            </div>
+          </article>
+
+          <article class="panel activity-panel">
+            <div class="panel-head">
+              <div><span class="kicker">OBSERVATION STREAM</span><h2>Recent movement</h2></div>
+              <span class="tag" id="event-count">0 EVENTS</span>
+            </div>
+            <div id="activity-list" class="activity-list">
+              <div class="empty">Waiting for filesystem movement…</div>
+            </div>
+          </article>
+        </div>
+
+        <article class="panel collection-panel">
+          <div class="panel-head"><div><span class="kicker">CURRENT STATE</span><h2>Collections</h2></div><span class="tag">READ ONLY</span></div>
+          <div id="collection-cards" class="collection-cards"><div class="empty">No collection state observed yet.</div></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-flow">
+        <article class="panel hero-flow">
+          <div class="panel-head">
+            <div><span class="kicker">LIVE MODE</span><h2>JSON movement visualizer</h2></div>
+            <div class="legend"><span><i class="cyan"></i>data</span><span><i class="amber"></i>history</span><span><i class="purple"></i>recovery</span></div>
+          </div>
+          <p class="muted">Particles are driven by normalized observed changes. They visualize movement between architectural stages; they do not claim to reproduce CPU instruction order.</p>
+          <div class="flow-stage large" id="flow-stage">
+            <canvas id="flow-canvas"></canvas>
+            <div class="flow-node" data-node="app"><b>APPLICATION</b><small>intent</small></div>
+            <div class="flow-node" data-node="tx"><b>TRANSACTION</b><small>atomic boundary</small></div>
+            <div class="flow-node" data-node="wal"><b>WAL</b><small>append history</small></div>
+            <div class="flow-node" data-node="current"><b>CURRENT</b><small>canonical rows</small></div>
+            <div class="flow-node" data-node="index"><b>INDEXES</b><small>derived lookup</small></div>
+            <div class="flow-node" data-node="history"><b>HISTORY</b><small>versions / snapshots</small></div>
+            <div class="flow-node" data-node="savior"><b>LAST SAVIOR</b><small>survival evidence</small></div>
+          </div>
+          <div class="event-inspector" id="event-inspector"><span>Latest event</span><code>waiting…</code></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-wal">
+        <div class="split">
+          <article class="panel">
+            <div class="panel-head"><div><span class="kicker">WRITE-AHEAD LOG</span><h2>Recent entries</h2></div><span class="tag" id="wal-count">0</span></div>
+            <div id="wal-list" class="wal-list"><div class="empty">No WAL entries observed.</div></div>
+          </article>
+          <article class="panel detail-panel">
+            <div class="panel-head"><div><span class="kicker">SELECTED ENTRY</span><h2>WAL inspector</h2></div></div>
+            <pre id="wal-detail">Select a WAL entry.</pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" id="view-data">
+        <article class="panel">
+          <div class="panel-head"><div><span class="kicker">CANONICAL COLLECTIONS</span><h2>Current data topology</h2></div><span class="tag">NO EDITING</span></div>
+          <div id="data-table-wrap" class="table-wrap"><table><thead><tr><th>Collection</th><th>Rows</th><th>Revision</th><th>Indexes</th><th>Updated</th></tr></thead><tbody id="data-table"></tbody></table></div>
+        </article>
+      </section>
+
+      <section class="view" id="view-recovery">
+        <div class="recovery-grid">
+          <article class="panel recovery-orbit">
+            <div class="panel-head"><div><span class="kicker">SURVIVAL ARCHITECTURE</span><h2>Recovery constellation</h2></div><span class="tag" id="recovery-validity">OBSERVE</span></div>
+            <div class="orbit">
+              <div class="orbit-center"><strong>LAST<br>SAVIOR</strong><small id="last-savior-id">absent</small></div>
+              <div class="orbit-node n1">MEMORY<br>PALACE</div>
+              <div class="orbit-node n2">SHADOW<br>LAWS</div>
+              <div class="orbit-node n3">ROSETTA</div>
+              <div class="orbit-node n4">QUATERNARY</div>
+              <div class="orbit-node n5">FORWARD<br>WITNESS</div>
+              <div class="orbit-node n6">FIREWALL</div>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><div><span class="kicker">AUTHORITY SURFACE</span><h2>Current boundaries</h2></div></div>
+            <dl class="facts">
+              <div><dt>Observatory</dt><dd>READ_ONLY_OBSERVER</dd></div>
+              <div><dt>Savior mode</dt><dd id="recovery-savior-mode">absent</dd></div>
+              <div><dt>Contract analysis</dt><dd id="recovery-contracts">absent</dd></div>
+              <div><dt>Firewall sequence</dt><dd id="recovery-firewall">0</dd></div>
+              <div><dt>Archive hash</dt><dd><code id="recovery-archive-hash">—</code></dd></div>
+            </dl>
+          </article>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
