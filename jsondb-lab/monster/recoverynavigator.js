@@ -214,25 +214,29 @@ class RecoveryNavigator {
     return plan;
   }
 
-  async verify(id = null) {
-    await this.init();
+  async verify(id = null, options = {}) {
+    if (options.readOnly !== true) await this.init();
     const plan = id ? await readJson(path.join(this.plans, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!plan) return { valid: false, status: 'ABSENT' };
+    if (!plan) return { valid: false, status: 'ABSENT', readOnly: options.readOnly === true };
     const copy = { ...plan }; delete copy.planHash;
     const computed = digest(copy);
     const authoritySafe = plan.authority?.writesCanonicalState === false && plan.authority?.automaticCanonicalPromotion === false;
     const terminal = [...(plan.firewall || [])].reverse().find(x => x.action === 'PROMOTE_CANONICAL');
     const terminalPromotionDenied = Boolean(terminal && terminal.allowed === false);
+    const readOnly = options.readOnly === true;
     const [historicalContracts, currentContracts, firewallReferences, liveFirewall] = await Promise.all([
-      this.k.recoveryContracts.version(plan.contractRegistryHash).catch(() => null),
-      this.k.recoveryContracts.init().catch(() => null),
-      this.k.authorityFirewall ? this.k.authorityFirewall.verifyReferences(plan.firewall || []).catch(error => ({ valid: false, error: error.message })) : Promise.resolve({ valid: true }),
-      this.k.authorityFirewall ? this.k.authorityFirewall.verifyLedger().catch(error => ({ valid: false, error: error.message })) : Promise.resolve({ valid: true })
+      this.k.recoveryContracts.version(plan.contractRegistryHash, { hydrate: !readOnly }).catch(() => null),
+      readOnly ? this.k.recoveryContracts.inspect().catch(() => null) : this.k.recoveryContracts.init().catch(() => null),
+      this.k.authorityFirewall ? this.k.authorityFirewall.verifyReferences(plan.firewall || [], { readOnly }).catch(error => ({ valid: false, error: error.message })) : Promise.resolve({ valid: true }),
+      this.k.authorityFirewall ? this.k.authorityFirewall.verifyLedger({ readOnly }).catch(error => ({ valid: false, error: error.message })) : Promise.resolve({ valid: true })
     ]);
     const historicalRegistryAvailable = Boolean(historicalContracts?.registryHash && historicalContracts.registryHash === plan.contractRegistryHash);
+    const historicalRegistrySafe = Boolean(historicalRegistryAvailable && Object.values(historicalContracts?.contracts || {}).every(c => c?.mayPromoteCanonical !== true));
     const currentRegistryMatches = Boolean(currentContracts?.registryHash && currentContracts.registryHash === plan.contractRegistryHash);
     return {
-      valid: computed === plan.planHash && authoritySafe && terminalPromotionDenied && historicalRegistryAvailable && firewallReferences.valid === true,
+      format: 'JSONDB-RECOVERY-NAVIGATOR-VERIFY-5',
+      valid: computed === plan.planHash && authoritySafe && terminalPromotionDenied && historicalRegistrySafe && firewallReferences.valid === true,
+      readOnly,
       id: plan.id,
       goal: plan.goal,
       status: plan.status,
@@ -241,13 +245,16 @@ class RecoveryNavigator {
       authoritySafe,
       terminalPromotionDenied,
       historicalRegistryAvailable,
+      historicalRegistrySafe,
       currentRegistryMatches,
       policyDriftedSincePlan: historicalRegistryAvailable && !currentRegistryMatches,
       firewallReferencesValid: firewallReferences.valid,
       firewallPrefixValid: firewallReferences.prefix?.valid,
       liveFirewallLedgerValid: liveFirewall.valid,
-      futureTailIncident: firewallReferences.valid === true && liveFirewall.valid === false,
-      blockers: plan.blockers || []
+      liveFirewallStatus: liveFirewall.status || 'PRESENT',
+      futureTailIncident: firewallReferences.valid === true && liveFirewall.status !== 'ABSENT' && liveFirewall.valid === false,
+      blockers: plan.blockers || [],
+      doctrine: 'Historical plan verification may run read-only against archived contracts and only the Firewall references the plan actually cites.'
     };
   }
 }
