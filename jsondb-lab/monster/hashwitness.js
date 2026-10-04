@@ -171,24 +171,31 @@ class HashWitnessCouncil {
     return this.verifyRound(record);
   }
 
-  async verifyRound(roundOrId = null) {
-    const registry = await this.init();
+  async verifyRound(roundOrId = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    const registry = readOnly ? await readJson(this.registry, null) : await this.init();
+    if (!registry) return { format: 'JSONDB-HASH-WITNESS-VERIFY-2', valid: false, status: 'ABSENT', readOnly, reason: 'hash witness registry not found', threshold: this.threshold };
     let round = roundOrId;
     if (!roundOrId) round = await readJson(path.join(this.root, 'latest-round.json'), null);
     else if (typeof roundOrId === 'string') round = await readJson(path.join(this.rounds, `${roundOrId}.json`), null);
-    if (!round) return { valid: false, reason: 'round not found', threshold: registry.threshold };
+    if (!round) return { format: 'JSONDB-HASH-WITNESS-VERIFY-2', valid: false, status: 'ABSENT', readOnly, reason: 'round not found', threshold: registry.threshold };
     const seenMembers = new Set();
     const results = [];
     for (const att of round.attestations || []) {
-      const publicKey = await this.publicKey(att.keyId);
-      const valid = Boolean(publicKey && !seenMembers.has(att.memberId) && verifyLamport(publicKey, round.statement, att.signature));
+      const member = registry.members.find(x => x.id === att.memberId);
+      const slot = member?.publicKeys?.find(x => x.keyId === att.keyId);
+      const publicKey = slot ? await this.publicKey(att.keyId) : null;
+      const publicRootMatches = Boolean(publicKey && slot?.publicRoot && publicKey.publicRoot === slot.publicRoot && att.publicRoot === slot.publicRoot);
+      const valid = Boolean(member && slot && publicRootMatches && !seenMembers.has(att.memberId) && verifyLamport(publicKey, round.statement, att.signature));
       if (valid) seenMembers.add(att.memberId);
-      results.push({ memberId: att.memberId, keyId: att.keyId, publicRoot: att.publicRoot, valid });
+      results.push({ memberId: att.memberId, keyId: att.keyId, publicRoot: att.publicRoot, publicRootMatches, valid });
     }
     const validSignatures = results.filter(x => x.valid).length;
     const threshold = Number(round.threshold || registry.threshold);
     return {
-      format: 'JSONDB-HASH-WITNESS-VERIFY-1', valid: validSignatures >= threshold,
+      format: 'JSONDB-HASH-WITNESS-VERIFY-2', valid: validSignatures >= threshold,
+      status: validSignatures >= threshold ? 'THRESHOLD_VALID' : 'INSUFFICIENT_VALID_SIGNATURES',
+      readOnly,
       validSignatures, threshold, memberCount: registry.members.length,
       statement: round.statement, results,
       warning: 'Hash-based one-time signatures reduce signature-family monoculture. Local keys are still not independent hardware trust domains.'
