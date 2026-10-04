@@ -126,12 +126,13 @@ class ProofCarryingRecoveryPlan {
     const cryptoValid = Boolean(crypto.valid && crypto.worldRoot === dossier.coreHash && Number(crypto.familyQuorum || 0) >= 2);
     const terminal = dossier.authority?.terminalPromotionDenial;
     const terminalDenied = Boolean(terminal && terminal.allowed === false);
+    const historicalValidation = this.k.recoveryContracts.validateRegistry(historicalRegistry);
     const historicalRegistryAvailable = Boolean(historicalRegistry?.registryHash && historicalRegistry.registryHash === dossier.contracts?.registryHash);
-    const historicalRegistrySafe = Boolean(historicalRegistryAvailable && Object.values(historicalRegistry?.contracts || {}).every(c => c?.mayPromoteCanonical !== true));
+    const historicalRegistrySafe = Boolean(historicalRegistryAvailable && historicalValidation.valid);
     const currentRegistryMatches = Boolean(currentRegistry?.registryHash && currentRegistry.registryHash === dossier.contracts?.registryHash);
 
     return {
-      format: 'JSONDB-PROOF-CARRYING-RECOVERY-PLAN-VERIFY-3',
+      format: 'JSONDB-PROOF-CARRYING-RECOVERY-PLAN-VERIFY-4',
       id: dossier.id,
       valid: staticValid && coreValid && plan.valid && policy.valid && cryptoValid && forwardValid && terminalDenied && historicalRegistrySafe,
       readOnly,
@@ -144,11 +145,12 @@ class ProofCarryingRecoveryPlan {
       terminalPromotionDenied: terminalDenied,
       historicalRegistryAvailable,
       historicalRegistrySafe,
+      historicalRegistryViolations: historicalValidation.violations || [],
       currentRegistryMatches,
       policyDriftedSinceDossier: historicalRegistryAvailable && !currentRegistryMatches,
       goal: dossier.navigator?.goal,
       source: dossier.navigator?.source?.id || null,
-      doctrine: 'Proof-plan verification may traverse historical policy evidence without hydrating or rewriting policy state.'
+      doctrine: 'Proof-plan verification may traverse a freshly revalidated historical constitution and its policy evidence without hydrating or rewriting policy state.'
     };
   }
 }
