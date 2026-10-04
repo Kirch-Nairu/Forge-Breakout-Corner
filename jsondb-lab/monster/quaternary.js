@@ -114,13 +114,18 @@ class QuaternaryColdCodec {
     return manifest;
   }
 
-  async load(generation=null) {
-    await this.init();
+  async load(generation=null, options={}) {
+    const readOnly=options.readOnly===true;
+    if(!readOnly)await this.init();
     if (!generation) generation=(await readJson(path.join(this.root,'latest.json'),null))?.generation;
-    if (!generation) throw new Error('No quaternary generation exists.');
+    if (!generation) {
+      const error=new Error('No quaternary generation exists.');
+      error.code='QUATERNARY_ABSENT';
+      throw error;
+    }
     const dir=path.join(this.generations,generation), manifest=await readJson(path.join(dir,'manifest.json'),null);
     if (!manifest) throw new Error(`Quaternary generation not found: ${generation}`);
-    return {dir,manifest};
+    return {dir,manifest,readOnly};
   }
 
   async readOligo(file,expected) {
@@ -132,8 +137,12 @@ class QuaternaryColdCodec {
     return buf;
   }
 
-  async recover(generation=null) {
-    const {dir,manifest}=await this.load(generation);
+  async recover(generation=null, options={}) {
+    const readOnly=options.readOnly===true;
+    let loaded;
+    try{loaded=await this.load(generation,{readOnly});}
+    catch(error){if(readOnly&&error.code==='QUATERNARY_ABSENT')return{status:'ABSENT',valid:false,readOnly,buffer:null,error:error.message};throw error;}
+    const {dir,manifest}=loaded;
     const shards=new Array(manifest.dataOligos).fill(null), damaged=[];
     for (const spec of manifest.data) {
       try { shards[spec.index]=await this.readOligo(path.join(dir,spec.file),spec.sha256); }
@@ -143,23 +152,24 @@ class QuaternaryColdCodec {
       const missing=[];
       for(let i=group.first;i<group.lastExclusive;i++)if(!shards[i])missing.push(i);
       if(!missing.length)continue;
-      if(missing.length>1)return{status:'UNRECOVERABLE',generation:manifest.generation,damaged,reason:`Parity group ${group.group} has ${missing.length} missing data oligos.`};
+      if(missing.length>1)return{status:'UNRECOVERABLE',valid:false,readOnly,generation:manifest.generation,damaged,reason:`Parity group ${group.group} has ${missing.length} missing data oligos.`};
       let p;
-      try{p=await this.readOligo(path.join(dir,group.file),group.sha256);}catch(error){return{status:'UNRECOVERABLE',generation:manifest.generation,damaged,reason:`Parity group ${group.group} unavailable: ${error.message}`};}
+      try{p=await this.readOligo(path.join(dir,group.file),group.sha256);}catch(error){return{status:'UNRECOVERABLE',valid:false,readOnly,generation:manifest.generation,damaged,reason:`Parity group ${group.group} unavailable: ${error.message}`};}
       const recovered=Buffer.from(p);
       for(let i=group.first;i<group.lastExclusive;i++){
         if(i===missing[0])continue;
         for(let j=0;j<recovered.length;j++)recovered[j]^=shards[i][j];
       }
       const spec=manifest.data[missing[0]];
-      if(sha(recovered)!==spec.sha256)return{status:'UNRECOVERABLE',generation:manifest.generation,reason:`Recovered oligo ${missing[0]} failed SHA-256.`};
+      if(sha(recovered)!==spec.sha256)return{status:'UNRECOVERABLE',valid:false,readOnly,generation:manifest.generation,reason:`Recovered oligo ${missing[0]} failed SHA-256.`};
       shards[missing[0]]=recovered;
     }
-    if(shards.some(x=>!x))return{status:'UNRECOVERABLE',generation:manifest.generation,reason:'Not all data oligos recovered.'};
+    if(shards.some(x=>!x))return{status:'UNRECOVERABLE',valid:false,readOnly,generation:manifest.generation,reason:'Not all data oligos recovered.'};
     const interleaved=Buffer.concat(shards).subarray(0,manifest.originalBytes);
     const original=unpermute(interleaved,manifest.interleaving.stride).subarray(0,manifest.originalBytes);
     const actual=sha(original);
-    return{status:actual===manifest.originalSha256?'RECOVERED':'HASH_MISMATCH',generation:manifest.generation,sha256:actual,expected:manifest.originalSha256,damaged,buffer:original};
+    const recovered=actual===manifest.originalSha256;
+    return{status:recovered?'RECOVERED':'HASH_MISMATCH',valid:recovered,readOnly,generation:manifest.generation,sha256:actual,expected:manifest.originalSha256,damaged,buffer:original};
   }
 
   async restore(target,generation=null){const r=await this.recover(generation);if(r.status!=='RECOVERED')throw new Error(`Quaternary recovery failed: ${r.status}`);await ensureDir(path.dirname(target));await fsp.writeFile(target,r.buffer);return{target,generation:r.generation,sha256:r.sha256,damaged:r.damaged};}
