@@ -35,9 +35,7 @@ class SemanticDeltaFossils{
     return changes;
   }
 
-  patchView(changes,direction){
-    return changes.map(c=>({kind:c.kind,field:c.field,table:c.table,id:c.id,value:clone(direction==='forward'?c.after:c.before)}));
-  }
+  patchView(changes,direction){return changes.map(c=>({kind:c.kind,field:c.field,table:c.table,id:c.id,value:clone(direction==='forward'?c.after:c.before)}));}
 
   apply(world,changes,direction='forward'){
     const out=clone(world);out.tables||={};const value=c=>clone(direction==='forward'?c.after:c.before);
@@ -45,10 +43,7 @@ class SemanticDeltaFossils{
       const v=value(c);
       if(c.kind==='root'){out[c.field]=v;continue;}
       if(c.kind==='table'){if(v==null)delete out.tables[c.table];else out.tables[c.table]=v;continue;}
-      if(c.kind==='table-meta'){
-        if(!out.tables[c.table])throw new Error(`Fossil apply missing table ${c.table}`);
-        out.tables[c.table].meta=v;continue;
-      }
+      if(c.kind==='table-meta'){if(!out.tables[c.table])throw new Error(`Fossil apply missing table ${c.table}`);out.tables[c.table].meta=v;continue;}
       if(c.kind==='row'){
         if(!out.tables[c.table])throw new Error(`Fossil apply missing table ${c.table}`);
         const rows=out.tables[c.table].rows||=[];const i=rows.findIndex(r=>String(r.id)===String(c.id));
@@ -60,31 +55,35 @@ class SemanticDeltaFossils{
     return out;
   }
 
-  async memoryWorld(id){
-    const v=await this.memory.verify(id,{repairPrimary:true});
-    if(!v.valid||!v._buffer)throw new Error(`Memory Palace endpoint unavailable: ${id} (${v.status})`);
-    return JSON.parse(v._buffer.toString('utf8'));
+  async memoryWorld(id){const v=await this.memory.verify(id,{repairPrimary:true});if(!v.valid||!v._buffer)throw new Error(`Memory Palace endpoint unavailable: ${id} (${v.status})`);return JSON.parse(v._buffer.toString('utf8'));}
+
+  previousEndpoint(record){
+    if(!record)return null;
+    if(record.format==='JSONDB-SEMANTIC-FOSSIL-GENESIS-1')return{memoryId:record.toMemoryId,worldSha256:record.toWorldSha256};
+    return record.to||null;
   }
 
   async capture(label='fossil'){
     await this.init();
-    const previous=await readJson(path.join(this.memory.root,'latest.json'),null);
+    const fossilTip=await readJson(path.join(this.root,'latest.json'),null);
+    const prior=this.previousEndpoint(fossilTip);
     const current=await this.memory.snapshot(`${label}:fossil-endpoint`);
-    if(!previous){
-      const genesis={format:'JSONDB-SEMANTIC-FOSSIL-GENESIS-1',id:`${Date.now()}-genesis`,label,createdAt:now(),toMemoryId:current.id,toWorldSha256:current.worldSha256,changes:0};
+    if(!prior){
+      const genesis={format:'JSONDB-SEMANTIC-FOSSIL-GENESIS-1',id:`${Date.now()}-genesis`,label,createdAt:now(),toMemoryId:current.id,toWorldSha256:current.worldSha256,changes:0,doctrine:'Genesis pins the first fossil endpoint. Later fossils advance from this fossil-specific tip rather than arbitrary Memory Palace activity.'};
       await atomicJson(path.join(this.root,'latest.json'),genesis);return genesis;
     }
-    const [before,after]=await Promise.all([this.memoryWorld(previous.id),this.memoryWorld(current.id)]);
+    const [before,after]=await Promise.all([this.memoryWorld(prior.memoryId),this.memoryWorld(current.id)]);
     const changes=this.diffWorld(before,after);
     const forward=this.patchView(changes,'forward'),inverse=this.patchView(changes,'inverse');
     const record={
-      format:'JSONDB-SEMANTIC-DELTA-FOSSIL-1',
+      format:'JSONDB-SEMANTIC-DELTA-FOSSIL-2',
       id:`${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,label,createdAt:now(),
-      from:{memoryId:previous.id,worldSha256:previous.worldSha256},
+      parentFossil:fossilTip?.id||null,
+      from:{memoryId:prior.memoryId,worldSha256:prior.worldSha256},
       to:{memoryId:current.id,worldSha256:current.worldSha256},
       changeCount:changes.length,changes,
       forwardPatchHash:hash(forward),inversePatchHash:hash(inverse),
-      doctrine:'A fossil is reversible semantic history between two independently content-addressed Memory Palace worlds. Recovery remains sandbox-only.'
+      doctrine:'A fossil is reversible semantic history between two independently content-addressed Memory Palace worlds. Its ancestry follows the fossil chain, not incidental snapshot timing. Recovery remains sandbox-only.'
     };
     record.fossilHash=hash(record);
     await atomicJson(path.join(this.records,`${record.id}.json`),record);await atomicJson(path.join(this.root,'latest.json'),record);return record;
@@ -101,22 +100,16 @@ class SemanticDeltaFossils{
     const forwardWorld=this.apply(before,record.changes||[],'forward'),inverseWorld=this.apply(after,record.changes||[],'inverse');
     const forwardWorldHash=hash(forwardWorld),inverseWorldHash=hash(inverseWorld),expectedAfterHash=hash(after),expectedBeforeHash=hash(before);
     return{
-      format:'JSONDB-SEMANTIC-DELTA-FOSSIL-VERIFY-1',id:record.id,
+      format:'JSONDB-SEMANTIC-DELTA-FOSSIL-VERIFY-2',id:record.id,
       valid:staticValid&&forwardHash===record.forwardPatchHash&&inverseHash===record.inversePatchHash&&forwardWorldHash===expectedAfterHash&&inverseWorldHash===expectedBeforeHash,
       staticValid,
       forward:{patchHashValid:forwardHash===record.forwardPatchHash,reconstructedWorldHash:forwardWorldHash,expectedWorldHash:expectedAfterHash,valid:forwardWorldHash===expectedAfterHash},
       inverse:{patchHashValid:inverseHash===record.inversePatchHash,reconstructedWorldHash:inverseWorldHash,expectedWorldHash:expectedBeforeHash,valid:inverseWorldHash===expectedBeforeHash},
-      endpoints:{from:record.from,to:record.to},changeCount:record.changeCount
+      endpoints:{from:record.from,to:record.to},changeCount:record.changeCount,parentFossil:record.parentFossil||null
     };
   }
 
-  async reconstruct(id,direction,target){
-    const record=await readJson(path.join(this.records,`${id}.json`),null);if(!record)throw new Error(`Fossil not found: ${id}`);
-    const sourceId=direction==='inverse'?record.to.memoryId:record.from.memoryId;
-    const source=await this.memoryWorld(sourceId);const world=this.apply(source,record.changes||[],direction==='inverse'?'inverse':'forward');
-    await ensureDir(path.dirname(target));await require('fs/promises').writeFile(target,`${JSON.stringify(world,null,2)}\n`,'utf8');
-    return{target,direction,sha256:hash(world),fossilId:id};
-  }
+  async reconstruct(id,direction,target){const record=await readJson(path.join(this.records,`${id}.json`),null);if(!record)throw new Error(`Fossil not found: ${id}`);const sourceId=direction==='inverse'?record.to.memoryId:record.from.memoryId;const source=await this.memoryWorld(sourceId);const world=this.apply(source,record.changes||[],direction==='inverse'?'inverse':'forward');await ensureDir(path.dirname(target));await require('fs/promises').writeFile(target,`${JSON.stringify(world,null,2)}\n`,'utf8');return{target,direction,sha256:hash(world),fossilId:id};}
 }
 
 module.exports={SemanticDeltaFossils};
