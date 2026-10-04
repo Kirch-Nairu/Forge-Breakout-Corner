@@ -118,15 +118,16 @@ class HistoryCourt {
     return record;
   }
 
-  async verify(id = null) {
-    await this.init();
+  async verify(id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const record = id ? await readJson(path.join(this.cases, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!record) return { valid: false, status: 'ABSENT' };
+    if (!record) return { valid: false, status: 'ABSENT', readOnly };
     const copy = { ...record }; delete copy.caseHash; delete copy.polyhash;
     const computed = hash(copy);
     let polyhash = null;
     if (this.polyhash && record.polyhash) polyhash = await this.polyhash.verify({ ...copy, caseHash: record.caseHash }, record.polyhash);
-    return { valid: computed === record.caseHash && (!polyhash || polyhash.valid), id: record.id, expected: record.caseHash, computed, verdict: record.verdict, polyhash };
+    return { format: 'JSONDB-HISTORY-COURT-VERIFY-2', valid: computed === record.caseHash && (!polyhash || polyhash.valid), readOnly, id: record.id, expected: record.caseHash, computed, verdict: record.verdict, polyhash };
   }
 }
 
