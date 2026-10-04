@@ -7,15 +7,15 @@ const { now, ensureDir, readJson, atomicJson } = require('./jsonfs');
 function digest(value) { return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 
 class OmegaFederation {
-  constructor({ savior, epochSealer, timeWeave, temporalParity, historyCourt, worldTree, polyhash }) {
-    Object.assign(this, { savior, epochSealer, timeWeave, temporalParity, historyCourt, worldTree, polyhash });
+  constructor({ savior, epochSealer, timeWeave, temporalParity, historyCourt, worldTree, polyhash, hologram = null }) {
+    Object.assign(this, { savior, epochSealer, timeWeave, temporalParity, historyCourt, worldTree, polyhash, hologram });
     this.root = path.join(savior.root, 'omega-federation');
     this.receipts = path.join(this.root, 'receipts');
   }
 
   async init() {
     await ensureDir(this.receipts);
-    for (const system of [this.epochSealer, this.timeWeave, this.temporalParity, this.historyCourt]) {
+    for (const system of [this.epochSealer, this.timeWeave, this.temporalParity, this.historyCourt, this.hologram]) {
       if (system && typeof system.init === 'function') await system.init();
     }
   }
@@ -24,6 +24,11 @@ class OmegaFederation {
     await this.init();
     const epoch = await this.epochSealer.seal(label, options.epoch || options);
     const weave = await this.timeWeave.append(epoch);
+    const hologram = this.hologram ? await this.hologram.capture(`${label}:hologram`, {
+      width: Number(options.hologramWidth || 64),
+      projections: Number(options.hologramProjections || 8),
+      seed: epoch.epochHash
+    }) : null;
     let parity = null;
     try {
       parity = await this.temporalParity.seal({ window: Number(options.temporalWindow || 8) });
@@ -32,19 +37,17 @@ class OmegaFederation {
     }
 
     const refName = options.federationRef || 'federation';
-    let ref;
     try {
       const existing = await this.worldTree.ref(refName);
-      if (!existing) ref = await this.worldTree.branch(refName, options.fromRef || 'main');
-      else ref = existing;
-    } catch {
-      ref = null;
-    }
+      if (!existing) await this.worldTree.branch(refName, options.fromRef || 'main');
+    } catch {}
     const lineageCommit = await this.worldTree.commitCurrent(`${label}:federation-lineage`, refName, {
       omegaEpochId: epoch.id,
       omegaEpochHash: epoch.epochHash,
       timeWeaveHash: weave.weaveHash,
-      temporalParityWindow: parity.id || parity.window || null
+      temporalParityWindow: parity.id || parity.window || null,
+      semanticHologramId: hologram?.id || null,
+      semanticHologramHash: hologram?.hologramHash || null
     });
 
     let court = null;
@@ -54,16 +57,17 @@ class OmegaFederation {
 
     const previous = await readJson(path.join(this.root, 'latest.json'), null);
     const receipt = {
-      format: 'JSONDB-OMEGA-FEDERATION-1',
+      format: 'JSONDB-OMEGA-FEDERATION-2',
       id: `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,
       label, sealedAt: now(),
       previousFederationHash: previous?.federationHash || null,
       omegaEpoch: { id: epoch.id, epochHash: epoch.epochHash, semanticWorldSha256: epoch.semanticWorldSha256 },
       timeWeave: { position: weave.position, weaveHash: weave.weaveHash, anchors: weave.anchors?.length || 0 },
       temporalParity: parity.id ? { id: parity.id, dataEpochs: parity.dataEpochs?.length || 0, parityShards: parity.parity?.length || 0 } : parity,
+      semanticHologram: hologram ? { id: hologram.id, hologramHash: hologram.hologramHash, width: hologram.width, projections: hologram.projections } : null,
       worldTree: { ref: refName, commit: lineageCommit.id, worldSha256: lineageCommit.worldSha256 },
       historyCourt: court ? { id: court.id, caseHash: court.caseHash, verdict: court.verdict, preferred: court.preferred } : null,
-      doctrine: 'Federation binds independent historical structures around one OMEGA epoch. It preserves branch ambiguity and never grants automatic promotion authority.'
+      doctrine: 'Federation binds recoverable state and non-recoverable corroboration around one OMEGA epoch. It preserves branch ambiguity and never grants automatic promotion authority.'
     };
     receipt.federationHash = digest(receipt);
     if (this.polyhash) receipt.polyhash = await this.polyhash.envelope(receipt, { purpose: 'omega-federation' });
@@ -82,15 +86,26 @@ class OmegaFederation {
     const weave = await this.timeWeave.verifyNode(receipt.omegaEpoch.id).catch(error => ({ valid: false, error: error.message }));
     const parity = receipt.temporalParity?.id ? await this.temporalParity.inspect(receipt.temporalParity.id).catch(error => ({ damaged: Infinity, error: error.message })) : null;
     const court = receipt.historyCourt?.id ? await this.historyCourt.verify(receipt.historyCourt.id).catch(error => ({ valid: false, error: error.message })) : null;
+    let hologram = null;
+    if (receipt.semanticHologram?.id && this.hologram) {
+      const record = await readJson(path.join(this.hologram.records, `${receipt.semanticHologram.id}.json`), null);
+      hologram = {
+        present: Boolean(record),
+        hashMatchesReceipt: Boolean(record && record.hologramHash === receipt.semanticHologram.hologramHash),
+        liveComparison: options.live === true && record ? await this.hologram.compare(null, record.id).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message })) : null
+      };
+    }
     let polyhash = null;
     if (this.polyhash && receipt.polyhash) polyhash = await this.polyhash.verify({ ...copy, federationHash: receipt.federationHash }, receipt.polyhash);
     const parityHealthy = !parity || Number(parity.damaged || 0) <= 2;
+    const hologramHealthy = !receipt.semanticHologram || (hologram?.present && hologram?.hashMatchesReceipt);
     return {
-      format: 'JSONDB-OMEGA-FEDERATION-VERIFY-1', id: receipt.id,
-      valid: computed === receipt.federationHash && epoch.valid === true && weave.valid === true && parityHealthy && (!court || court.valid === true) && (!polyhash || polyhash.valid),
+      format: 'JSONDB-OMEGA-FEDERATION-VERIFY-2', id: receipt.id,
+      valid: computed === receipt.federationHash && epoch.valid === true && weave.valid === true && parityHealthy && hologramHealthy && (!court || court.valid === true) && (!polyhash || polyhash.valid),
       staticValid: computed === receipt.federationHash,
       expectedFederationHash: receipt.federationHash, computedFederationHash: computed,
       epoch, weave, temporalParity: parity ? { damaged: parity.damaged, recoverable: Number(parity.damaged || 0) <= 2, error: parity.error } : null,
+      semanticHologram: hologram,
       historyCourt: court, polyhash
     };
   }
