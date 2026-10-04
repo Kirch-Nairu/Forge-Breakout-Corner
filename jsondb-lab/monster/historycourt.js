@@ -126,7 +126,7 @@ class HistoryCourt {
     const copy = { ...record }; delete copy.caseHash; delete copy.polyhash;
     const computed = hash(copy);
     let polyhash = null;
-    if (this.polyhash && record.polyhash) polyhash = await this.polyhash.verify({ ...copy, caseHash: record.caseHash }, record.polyhash);
+    if (this.polyhash && record.polyhash) polyhash = await this.polyhash.verify({ ...copy, caseHash: record.caseHash }, record.polyhash, { readOnly });
     return { format: 'JSONDB-HISTORY-COURT-VERIFY-2', valid: computed === record.caseHash && (!polyhash || polyhash.valid), readOnly, id: record.id, expected: record.caseHash, computed, verdict: record.verdict, polyhash };
   }
 }
