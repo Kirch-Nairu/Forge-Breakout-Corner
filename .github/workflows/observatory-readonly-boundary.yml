@@ -1,0 +1,39 @@
+name: Observatory Read-Only Boundary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'jsondb-lab/observatory/**'
+      - '.github/workflows/observatory-readonly-boundary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observatory-boundary:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax-check Observatory JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check jsondb-lab/observatory/server.js
+          node --check jsondb-lab/observatory/selftest.js
+          node --check jsondb-lab/observatory/public/app.js
+
+      - name: Bootstrap isolated JSONDB recovery state
+        run: node jsondb-lab/recovery-selftest.js --bootstrap
+
+      - name: Prove read-only GUI boundary and real live observation
+        run: node jsondb-lab/observatory/selftest.js
