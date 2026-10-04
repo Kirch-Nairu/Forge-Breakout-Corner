@@ -12,91 +12,37 @@ class RecoveryContractRegistry{
   this.file=path.join(this.root,'registry.json');
   this.versions=path.join(this.root,'versions');
  }
- async archiveNames(){
-  return(await fsp.readdir(this.root).catch(()=>[])).filter(name=>/^registry-.*\.json$/.test(name)&&name!=='registry.json').sort();
+ async archiveNames(){return(await fsp.readdir(this.root).catch(()=>[])).filter(name=>/^registry-.*\.json$/.test(name)&&name!=='registry.json').sort();}
+ validateRegistry(registry){
+  if(!registry)return{valid:false,status:'ABSENT',registryHash:null,computedRegistryHash:null,contracts:0,automaticPromoters:0,violations:[{type:'REGISTRY_ABSENT'}],warnings:[]};
+  const computedRegistryHash=registryContentHash(registry),contracts=Object.values(registry.contracts||{}),violations=[],warnings=[];
+  if(computedRegistryHash!==registry.registryHash)violations.push({type:'REGISTRY_CONTENT_HASH_MISMATCH',declared:registry.registryHash,computed:computedRegistryHash});
+  if(registry.format!=='JSONDB-RECOVERY-CONTRACTS-5')warnings.push({type:'LEGACY_REGISTRY_FORMAT',format:registry.format||null});
+  for(const c of contracts){
+   if(c?.mayPromoteCanonical===true)violations.push({type:'AUTO_PROMOTION_AUTHORITY',id:c.id});
+   if(c?.kind==='corroborative'&&(c.reconstructs||[]).length)violations.push({type:'CORROBORATOR_RECONSTRUCTS',id:c.id,reconstructs:c.reconstructs});
+   if(c?.kind==='reconstructive'&&!(c.reconstructs||[]).length)warnings.push({type:'RECONSTRUCTIVE_WITHOUT_TARGET',id:c.id});
+   if(c?.mayAuthorize&&c.kind!=='authority')warnings.push({type:'AUTHORIZATION_OUTSIDE_AUTHORITY_CLASS',id:c.id});
+   if(c?.kind==='planning'&&(c.mayNominate||c.mayAuthorize||(c.reconstructs||[]).length))violations.push({type:'PLANNER_AUTHORITY_ESCALATION',id:c.id});
+   if(c?.kind==='planning-evidence'&&(c.mayNominate||c.mayAuthorize||(c.reconstructs||[]).length))violations.push({type:'PLANNING_EVIDENCE_AUTHORITY_ESCALATION',id:c.id});
+   if(c?.kind==='policy-enforcement'&&(c.mayNominate||c.mayAuthorize||(c.reconstructs||[]).length))violations.push({type:'FIREWALL_AUTHORITY_ESCALATION',id:c.id});
+   if(c?.id==='policy-checkpoint'&&(c.mayNominate||c.mayAuthorize||(c.reconstructs||[]).length))violations.push({type:'POLICY_CHECKPOINT_AUTHORITY_ESCALATION',id:c.id});
+  }
+  const reconstructors=contracts.filter(c=>(c.reconstructs||[]).length).map(c=>c.id),corroborators=contracts.filter(c=>(c.corroborates||[]).length&&!((c.reconstructs||[]).length)).map(c=>c.id),dependencyReverse={};
+  for(const c of contracts)for(const d of c.dependencies||[])(dependencyReverse[d]||=[]).push(c.id);
+  return{valid:violations.length===0,status:'PRESENT',registryHash:registry.registryHash||null,computedRegistryHash,formatVersion:registry.format||null,contracts:contracts.length,automaticPromoters:contracts.filter(c=>c?.mayPromoteCanonical===true).length,violations,warnings,reconstructors,corroborators,dependencyReverse,summary:{contracts:contracts.length,reconstructors:reconstructors.length,nonReconstructiveCorroborators:corroborators.length,automaticPromoters:contracts.filter(c=>c?.mayPromoteCanonical===true).length,planners:contracts.filter(c=>c.kind==='planning').length,planningEvidence:contracts.filter(c=>c.kind==='planning-evidence').length,analyses:contracts.filter(c=>c.kind==='analysis').length,policyEnforcers:contracts.filter(c=>c.kind==='policy-enforcement').length,policyCheckpoints:contracts.filter(c=>c.id==='policy-checkpoint').length}};
  }
  async persistVersion(registry,options={}){
   if(!registry?.registryHash)return false;
-  const computed=registryContentHash(registry);
-  if(computed!==registry.registryHash){
-   if(options.strict!==false)throw new Error(`Recovery Contract registry hash mismatch: declared ${registry.registryHash}, computed ${computed}`);
-   return false;
-  }
-  await ensureDir(this.versions);
-  const file=path.join(this.versions,`${registry.registryHash}.json`);
-  if(!(await readJson(file,null)))await atomicJson(file,registry);
-  return true;
+  const validation=this.validateRegistry(registry);
+  if(validation.computedRegistryHash!==registry.registryHash){if(options.strict!==false)throw new Error(`Recovery Contract registry hash mismatch: declared ${registry.registryHash}, computed ${validation.computedRegistryHash}`);return false;}
+  await ensureDir(this.versions);const file=path.join(this.versions,`${registry.registryHash}.json`);if(!(await readJson(file,null)))await atomicJson(file,registry);return true;
  }
- async readArchivedVersion(registryHash){
-  if(!registryHash)return null;
-  for(const name of await this.archiveNames()){
-   const archived=await readJson(path.join(this.root,name),null);
-   if(!archived||archived.registryHash!==registryHash)continue;
-   if(registryContentHash(archived)!==registryHash)continue;
-   return archived;
-  }
-  return null;
- }
- async hydrateArchiveVersions(){
-  await ensureDir(this.root);await ensureDir(this.versions);
-  const names=await this.archiveNames();
-  let hydrated=0,skipped=0;
-  for(const name of names){
-   const archived=await readJson(path.join(this.root,name),null);
-   if(!archived?.registryHash){skipped++;continue;}
-   const ok=await this.persistVersion(archived,{strict:false});
-   if(ok)hydrated++;else skipped++;
-  }
-  return{archives:names.length,hydrated,skipped};
- }
- async inspect(){
-  const registry=await readJson(this.file,null);
-  if(!registry)return{valid:false,status:'ABSENT',registryHash:null,computedRegistryHash:null,automaticPromoters:null,violations:[{type:'REGISTRY_ABSENT'}]};
-  const computedRegistryHash=registryContentHash(registry);
-  const contracts=Object.values(registry.contracts||{});
-  const violations=[];
-  if(computedRegistryHash!==registry.registryHash)violations.push({type:'REGISTRY_CONTENT_HASH_MISMATCH',declared:registry.registryHash,computed:computedRegistryHash});
-  for(const contract of contracts){
-   if(contract?.mayPromoteCanonical===true)violations.push({type:'AUTO_PROMOTION_AUTHORITY',id:contract.id});
-   if(contract?.kind==='corroborative'&&(contract.reconstructs||[]).length)violations.push({type:'CORROBORATOR_RECONSTRUCTS',id:contract.id});
-   if(contract?.kind==='planning'&&(contract.mayNominate||contract.mayAuthorize||(contract.reconstructs||[]).length))violations.push({type:'PLANNER_AUTHORITY_ESCALATION',id:contract.id});
-   if(contract?.kind==='planning-evidence'&&(contract.mayNominate||contract.mayAuthorize||(contract.reconstructs||[]).length))violations.push({type:'PLANNING_EVIDENCE_AUTHORITY_ESCALATION',id:contract.id});
-   if(contract?.kind==='policy-enforcement'&&(contract.mayNominate||contract.mayAuthorize||(contract.reconstructs||[]).length))violations.push({type:'FIREWALL_AUTHORITY_ESCALATION',id:contract.id});
-   if(contract?.id==='policy-checkpoint'&&(contract.mayNominate||contract.mayAuthorize||(contract.reconstructs||[]).length))violations.push({type:'POLICY_CHECKPOINT_AUTHORITY_ESCALATION',id:contract.id});
-  }
-  return{
-   format:'JSONDB-RECOVERY-CONTRACT-FORENSIC-INSPECT-1',
-   valid:violations.length===0,
-   status:'PRESENT',
-   registryHash:registry.registryHash||null,
-   computedRegistryHash,
-   formatVersion:registry.format||null,
-   contracts:contracts.length,
-   automaticPromoters:contracts.filter(c=>c?.mayPromoteCanonical===true).length,
-   violations,
-   doctrine:'Read-only inspection never creates, migrates, hydrates, or rewrites Recovery Contract state.'
-  };
- }
- async init(){
-  await ensureDir(this.root);await ensureDir(this.versions);
-  await this.hydrateArchiveVersions();
-  let r=await readJson(this.file,null);
-  if(!r||r.format!=='JSONDB-RECOVERY-CONTRACTS-5'){
-   if(r){await this.persistVersion(r,{strict:false});await atomicJson(path.join(this.root,`registry-archive-${Date.now()}.json`),r);}
-   r=this.build();await atomicJson(this.file,r);
-  }
-  await this.persistVersion(r);
-  return r;
- }
- async version(registryHash,options={}){
-  if(!registryHash)return null;
-  const found=await readJson(path.join(this.versions,`${registryHash}.json`),null);
-  if(found&&found.registryHash===registryHash&&registryContentHash(found)===registryHash)return found;
-  const archived=await this.readArchivedVersion(registryHash);
-  if(!archived)return null;
-  if(options.hydrate!==false)await this.persistVersion(archived);
-  return archived;
- }
+ async readArchivedVersion(registryHash){if(!registryHash)return null;for(const name of await this.archiveNames()){const archived=await readJson(path.join(this.root,name),null);if(!archived||archived.registryHash!==registryHash)continue;if(this.validateRegistry(archived).computedRegistryHash!==registryHash)continue;return archived;}return null;}
+ async hydrateArchiveVersions(){await ensureDir(this.root);await ensureDir(this.versions);const names=await this.archiveNames();let hydrated=0,skipped=0;for(const name of names){const archived=await readJson(path.join(this.root,name),null);if(!archived?.registryHash){skipped++;continue;}const ok=await this.persistVersion(archived,{strict:false});if(ok)hydrated++;else skipped++;}return{archives:names.length,hydrated,skipped};}
+ async inspect(){const registry=await readJson(this.file,null);const validation=this.validateRegistry(registry);return{format:'JSONDB-RECOVERY-CONTRACT-FORENSIC-INSPECT-2',...validation,doctrine:'Read-only inspection never creates, migrates, hydrates, or rewrites Recovery Contract state.'};}
+ async init(){await ensureDir(this.root);await ensureDir(this.versions);await this.hydrateArchiveVersions();let r=await readJson(this.file,null);if(!r||r.format!=='JSONDB-RECOVERY-CONTRACTS-5'){if(r){await this.persistVersion(r,{strict:false});await atomicJson(path.join(this.root,`registry-archive-${Date.now()}.json`),r);}r=this.build();await atomicJson(this.file,r);}await this.persistVersion(r);return r;}
+ async version(registryHash,options={}){if(!registryHash)return null;const found=await readJson(path.join(this.versions,`${registryHash}.json`),null);if(found&&found.registryHash===registryHash&&this.validateRegistry(found).computedRegistryHash===registryHash)return found;const archived=await this.readArchivedVersion(registryHash);if(!archived)return null;if(options.hydrate!==false)await this.persistVersion(archived);return archived;}
  contract(id,kind,reconstructs,corroborates,dependencies,extra={}){return{id,kind,reconstructs,corroborates,dependencies,mayAutoRepair:extra.mayAutoRepair||[],mayNominate:Boolean(extra.mayNominate),mayAuthorize:Boolean(extra.mayAuthorize),mayPromoteCanonical:false,forbidden:[...(extra.forbidden||[]),'silent-canonical-promotion'],notes:extra.notes||[]};}
  build(){
   const c=[];
@@ -130,27 +76,7 @@ class RecoveryContractRegistry{
   c.push(this.contract('last-savior','orchestrator',[],['cross-family-consistency'],['federation','rosetta-capsule','quaternary-cold-codec','shadow-laws','forward-witness','recovery-contracts'],{forbidden:['treat-own-receipt-as-sole-proof']}));
   const registry={format:'JSONDB-RECOVERY-CONTRACTS-5',createdAt:now(),contracts:Object.fromEntries(c.map(x=>[x.id,x])),globalDoctrine:['No subsystem may promote canonical state automatically.','Reconstructive and corroborative functions should remain separable.','Authority evidence does not reconstruct bytes.','Transport redundancy is not semantic truth.','Interpretation metadata is not recovery authority.','Planning does not imply execution authority.','Policy enforcement is deny-by-default and may not grant authority absent from the registry.','Policy checkpoints may attest policy history but never create new policy authority.','Proof-carrying plans may preserve planning evidence but never upgrade that evidence into execution authority.','Mutation tests must accept only verified reroute or verified hard block under evidence loss.']};registry.registryHash=hash(registry);return registry;
  }
- async reset(){
-  const old=await readJson(this.file,null);
-  if(old){await this.persistVersion(old,{strict:false});await atomicJson(path.join(this.root,`registry-reset-archive-${Date.now()}.json`),old);}
-  const r=this.build();await atomicJson(this.file,r);await this.persistVersion(r);return r;
- }
- async analyze(){
-  const r=await this.init(),contracts=Object.values(r.contracts||{}),violations=[],warnings=[];
-  for(const c of contracts){
-   if(c.mayPromoteCanonical)violations.push({type:'AUTO_PROMOTION_AUTHORITY',id:c.id});
-   if(c.kind==='corroborative'&&(c.reconstructs||[]).length)violations.push({type:'CORROBORATOR_RECONSTRUCTS',id:c.id,reconstructs:c.reconstructs});
-   if(c.kind==='reconstructive'&&!(c.reconstructs||[]).length)warnings.push({type:'RECONSTRUCTIVE_WITHOUT_TARGET',id:c.id});
-   if(c.mayAuthorize&&c.kind!=='authority')warnings.push({type:'AUTHORIZATION_OUTSIDE_AUTHORITY_CLASS',id:c.id});
-   if(c.kind==='planning'&&(c.mayNominate||c.mayAuthorize||(c.reconstructs||[]).length))violations.push({type:'PLANNER_AUTHORITY_ESCALATION',id:c.id});
-   if(c.kind==='planning-evidence'&&(c.mayNominate||c.mayAuthorize||(c.reconstructs||[]).length))violations.push({type:'PLANNING_EVIDENCE_AUTHORITY_ESCALATION',id:c.id});
-   if(c.kind==='policy-enforcement'&&(c.mayNominate||c.mayAuthorize||(c.reconstructs||[]).length))violations.push({type:'FIREWALL_AUTHORITY_ESCALATION',id:c.id});
-   if(c.id==='policy-checkpoint'&&(c.mayNominate||c.mayAuthorize||(c.reconstructs||[]).length))violations.push({type:'POLICY_CHECKPOINT_AUTHORITY_ESCALATION',id:c.id});
-  }
-  const reconstructors=contracts.filter(c=>(c.reconstructs||[]).length).map(c=>c.id),corroborators=contracts.filter(c=>(c.corroborates||[]).length&&!((c.reconstructs||[]).length)).map(c=>c.id);
-  const dependencyReverse={};for(const c of contracts)for(const d of c.dependencies||[])(dependencyReverse[d]||=[]).push(c.id);
-  const report={format:'JSONDB-RECOVERY-CONTRACT-ANALYSIS-5',at:now(),registryHash:r.registryHash,valid:violations.length===0,violations,warnings,summary:{contracts:contracts.length,reconstructors:reconstructors.length,nonReconstructiveCorroborators:corroborators.length,automaticPromoters:contracts.filter(c=>c.mayPromoteCanonical).length,planners:contracts.filter(c=>c.kind==='planning').length,planningEvidence:contracts.filter(c=>c.kind==='planning-evidence').length,analyses:contracts.filter(c=>c.kind==='analysis').length,policyEnforcers:contracts.filter(c=>c.kind==='policy-enforcement').length,policyCheckpoints:contracts.filter(c=>c.id==='policy-checkpoint').length},reconstructors,corroborators,dependencyReverse,doctrine:'This checks authority-shape drift, not implementation correctness.'};
-  await atomicJson(path.join(this.root,'latest-analysis.json'),report);return report;
- }
+ async reset(){const old=await readJson(this.file,null);if(old){await this.persistVersion(old,{strict:false});await atomicJson(path.join(this.root,`registry-reset-archive-${Date.now()}.json`),old);}const r=this.build();await atomicJson(this.file,r);await this.persistVersion(r);return r;}
+ async analyze(){const r=await this.init(),v=this.validateRegistry(r),report={format:'JSONDB-RECOVERY-CONTRACT-ANALYSIS-6',at:now(),registryHash:r.registryHash,valid:v.valid,violations:v.violations,warnings:v.warnings,summary:v.summary,reconstructors:v.reconstructors,corroborators:v.corroborators,dependencyReverse:v.dependencyReverse,doctrine:'This checks authority-shape drift, not implementation correctness.'};await atomicJson(path.join(this.root,'latest-analysis.json'),report);return report;}
 }
 module.exports={RecoveryContractRegistry};
