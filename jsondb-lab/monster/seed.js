@@ -2,9 +2,8 @@
 
 const fsp = require('fs/promises');
 const path = require('path');
-const crypto = require('crypto');
 const {
-  now, ensureDir, readJson, atomicJson, listFilesRecursive, merkleRoot, hashFile
+  now, ensureDir, exists, readJson, atomicJson, listFilesRecursive, merkleRoot, hashFile
 } = require('./jsonfs');
 
 function safe(value) { return String(value || 'seed').replace(/[^A-Za-z0-9_.-]/g, '_'); }
@@ -22,6 +21,13 @@ class CivilizationSeed {
     if (!value) return false;
     await ensureDir(path.dirname(target));
     await atomicJson(target, value);
+    return true;
+  }
+
+  async copyTextIf(source, target) {
+    if (!(await exists(source))) return false;
+    await ensureDir(path.dirname(target));
+    await fsp.copyFile(source, target);
     return true;
   }
 
@@ -69,10 +75,23 @@ class CivilizationSeed {
       await fsp.writeFile(target, src.source, 'utf8');
     }
 
+    const rescueRuntimes = [];
+    for (const [file, runtime, command] of [
+      ['lifeboat.js', 'node', 'node lifeboat.js <savior-root>'],
+      ['lifeboat.py', 'python3-stdlib', 'python3 lifeboat.py --help']
+    ]) {
+      const copied = await this.copyTextIf(path.join(this.engine.root, file), path.join(sourceDir, file));
+      if (copied) rescueRuntimes.push({ runtime, entry: `recovery-source/${file}`, command });
+    }
+    await atomicJson(path.join(dir, 'RESCUE-RUNTIMES.json'), {
+      format: 'JSONDB-RESCUE-RUNTIMES-1', createdAt: now(), runtimes: rescueRuntimes,
+      doctrine: 'Prefer cross-runtime agreement when more than one rescue runtime is available. No package manager is required by either lifeboat.'
+    });
+
     const registry = {
-      format: 'JSONDB-SURVIVAL-FORMAT-REGISTRY-1', generatedAt: now(),
+      format: 'JSONDB-SURVIVAL-FORMAT-REGISTRY-2', generatedAt: now(),
       formats: {
-        survivorGenome: 'JSONDB-SURVIVOR-GENOME-1',
+        survivorGenome: genome.format || 'JSONDB-SURVIVOR-GENOME-1',
         crossHistoryBraid: 'JSONDB-CROSS-HISTORY-BRAID-1',
         trinityArk: 'JSONDB-TRINITY-ARK-1',
         xorArk: 'JSONDB-XOR-ARK-1',
@@ -82,26 +101,28 @@ class CivilizationSeed {
         memoryPalace: 'JSONDB-MEMORY-PALACE-1',
         formatPolyglot: 'JSONDB-FORMAT-POLYGLOT-CAPSULE-1',
         semanticChronicle: 'JSONDB-SEMANTIC-COMMIT-1',
-        repairConstitution: 'JSONDB-REPAIR-CONSTITUTION-1'
+        repairConstitution: 'JSONDB-REPAIR-CONSTITUTION-1',
+        bootSentinel: 'JSONDB-BOOT-SENTINEL-1',
+        sovereignClock: 'JSONDB-SOVEREIGN-CLOCK-1'
       },
       principle: 'Unknown formats must not be silently coerced into known ones. Prefer explicit migration or read-only forensic inspection.'
     };
     await atomicJson(path.join(dir, 'FORMAT-REGISTRY.json'), registry);
 
     const bootOrder = {
-      format: 'JSONDB-CIVILIZATION-BOOT-ORDER-1', generatedAt: now(),
+      format: 'JSONDB-CIVILIZATION-BOOT-ORDER-2', generatedAt: now(),
       phases: [
         { phase: 0, name: 'PRESERVE', actions: ['Copy surviving media before modifying anything.','Do not run repair in-place on the only surviving copy.'] },
-        { phase: 1, name: 'VERIFY_SEED', actions: ['Verify SEED-MANIFEST.json file hashes and Merkle root.','Verify SURVIVOR-GENOME.json source hashes.','Extract lifeboat.js from recovery-source if the repository is unavailable.'] },
+        { phase: 1, name: 'VERIFY_SEED', actions: ['Verify SEED-MANIFEST.json file hashes and Merkle root.','Verify SURVIVOR-GENOME.json source hashes.','Choose Node lifeboat.js or Python stdlib lifeboat.py from recovery-source.'] },
         { phase: 2, name: 'ESTABLISH_TRUTH', actions: ['Inspect Braid and witness public material.','Verify multiple recovery families independently.','Treat decoder disagreement as evidence, not inconvenience.'] },
         { phase: 3, name: 'RESTORE_SANDBOX', actions: ['Restore into a new directory.','Never overwrite surviving evidence during first recovery.'] },
-        { phase: 4, name: 'COMPARE', actions: ['Compare semantic hashes, catalog inference, Chronicle replay, and available decoder outputs.'] },
+        { phase: 4, name: 'COMPARE', actions: ['Compare semantic hashes, catalog inference, Chronicle replay, independent runtime decoders, and available archive outputs.'] },
         { phase: 5, name: 'PROMOTE_MANUALLY', actions: ['Only an operator may designate a sandbox as the new canonical world.','Automation may freeze authority; it may not silently increase authority.'] }
       ]
     };
     await atomicJson(path.join(dir, 'RECOVERY-ORDER.json'), bootOrder);
 
-    const readme = `JSONDB CIVILIZATION SEED\n\nThis directory is deliberately self-describing recovery material.\n\nStart with RECOVERY-ORDER.json.\nVerify SEED-MANIFEST.json before trusting included source.\nPrivate witness keys are intentionally NOT included.\nRestore into a sandbox first. Never overwrite the only surviving copy.\n\nThe term quantum-inspired elsewhere in JSONDB refers to classical speculative execution only.\n`;
+    const readme = `JSONDB CIVILIZATION SEED\n\nThis directory is deliberately self-describing recovery material.\n\nStart with RECOVERY-ORDER.json.\nVerify SEED-MANIFEST.json before trusting included source.\nRescue runtimes are listed in RESCUE-RUNTIMES.json.\nPrivate witness keys are intentionally NOT included.\nRestore into a sandbox first. Never overwrite the only surviving copy.\n\nThe term quantum-inspired elsewhere in JSONDB refers to classical speculative execution only.\n`;
     await fsp.writeFile(path.join(dir, 'READ-ME-FIRST.txt'), readme, 'utf8');
 
     const filesBeforeManifest = (await listFilesRecursive(dir)).filter(file => path.basename(file) !== 'SEED-MANIFEST.json');
@@ -109,16 +130,17 @@ class CivilizationSeed {
     for (const file of filesBeforeManifest) entries.push({ path: path.relative(dir, file).split(path.sep).join('/'), sha256: await hashFile(file), bytes: (await fsp.stat(file)).size });
     entries.sort((a,b)=>a.path.localeCompare(b.path));
     const manifest = {
-      format: 'JSONDB-CIVILIZATION-SEED-1', id, label, createdAt: now(),
+      format: 'JSONDB-CIVILIZATION-SEED-2', id, label, createdAt: now(),
       entries,
       merkleRoot: merkleRoot(entries.map(x => x.sha256)),
       files: entries.length,
+      rescueRuntimes,
       doctrine: 'The seed contains instructions, public trust material, format identifiers, recovery-source text, and references. It is bootstrap evidence, not proof that every referenced archive still survives.'
     };
     if (this.polyhash) manifest.polyhash = await this.polyhash.envelope(manifest, { purpose: 'civilization-seed-manifest' });
     await atomicJson(path.join(dir, 'SEED-MANIFEST.json'), manifest);
-    await atomicJson(path.join(this.root, 'latest.json'), { id, label, createdAt: manifest.createdAt, directory: dir, merkleRoot: manifest.merkleRoot, files: manifest.files });
-    return { id, directory: dir, merkleRoot: manifest.merkleRoot, files: manifest.files, references: Object.fromEntries(Object.entries(references).map(([k,v])=>[k,v?.id || v?.generation || null])) };
+    await atomicJson(path.join(this.root, 'latest.json'), { id, label, createdAt: manifest.createdAt, directory: dir, merkleRoot: manifest.merkleRoot, files: manifest.files, rescueRuntimes });
+    return { id, directory: dir, merkleRoot: manifest.merkleRoot, files: manifest.files, rescueRuntimes, references: Object.fromEntries(Object.entries(references).map(([k,v])=>[k,v?.id || v?.generation || null])) };
   }
 
   async verify(id = null) {
@@ -147,7 +169,7 @@ class CivilizationSeed {
       const copy = { ...manifest }; delete copy.polyhash;
       polyhash = await this.polyhash.verify(copy, manifest.polyhash);
     }
-    return { valid: valid && (!polyhash || polyhash.valid), status: valid ? 'INTACT' : 'DAMAGED', directory: dir, merkleRoot: manifest.merkleRoot, computedMerkleRoot: root, results, polyhash };
+    return { valid: valid && (!polyhash || polyhash.valid), status: valid ? 'INTACT' : 'DAMAGED', directory: dir, merkleRoot: manifest.merkleRoot, computedMerkleRoot: root, results, polyhash, rescueRuntimes: manifest.rescueRuntimes || [] };
   }
 }
 
