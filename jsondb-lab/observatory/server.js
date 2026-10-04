@@ -19,8 +19,11 @@ const staticRoutes = new Map([
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
   ['/index-lab.css', ['index-lab.css', 'text/css; charset=utf-8']],
+  ['/recovery-theater.css', ['recovery-theater.css', 'text/css; charset=utf-8']],
   ['/app.js', ['app.js', 'text/javascript; charset=utf-8']],
-  ['/index-lab.js', ['index-lab.js', 'text/javascript; charset=utf-8']]
+  ['/index-lab.js', ['index-lab.js', 'text/javascript; charset=utf-8']],
+  ['/wal-theater.js', ['wal-theater.js', 'text/javascript; charset=utf-8']],
+  ['/recovery-theater.js', ['recovery-theater.js', 'text/javascript; charset=utf-8']]
 ]);
 
 const observedSurfaces = [
@@ -177,6 +180,115 @@ async function indexLab(collection) {
       } : { builtAt: null, tx: 0, rowCount: 0, indexes: [] },
       sortFields: primitiveFieldOptions(rows)
     }
+  };
+}
+
+function contractPresent(id, archive, heads) {
+  const recovery = archive?.recoveryFamilies || {};
+  const corroboration = archive?.corroborationFamilies || {};
+  const direct = {
+    'memory-palace': recovery.memoryPalace,
+    'trinity-ark': recovery.trinity,
+    'quaternary-cold-codec': recovery.quaternaryGeneration,
+    'fountain-ark': recovery.fountain,
+    'temporal-parity': recovery.temporalParity,
+    'spacetime-ark': recovery.spacetimeArk,
+    'semantic-delta-fossils': recovery.semanticFossil?.id,
+    'semantic-hologram': corroboration.semanticHologram?.id,
+    'shadow-laws': corroboration.shadowLaws?.id,
+    'time-weave': corroboration.timeWeave?.nodeHash || corroboration.timeWeave?.position,
+    'crypto-council': corroboration.cryptographicCouncil,
+    'cross-history-braid': corroboration.crossHistoryBraid,
+    'last-savior': archive?.id,
+    'forward-witness': archive?.forwardWitness?.attestationHash,
+    'recovery-contracts': corroboration.recoveryContracts?.registryHash,
+    'recovery-jury': heads.jury?.id,
+    'jury-promotion-gate': heads.gate?.id,
+    'recovery-navigator': heads.navigator?.id,
+    'authority-firewall': heads.firewall?.decisionHash,
+    'rosetta-capsule': recovery.rosettaCapsule,
+    'civilization-seed': recovery.civilizationSeed
+  };
+  return Boolean(direct[id]);
+}
+
+async function recoveryGraph() {
+  const [registry, analysis, archive, jury, gate, navigator, firewall] = await Promise.all([
+    readJson(path.join(saviorRoot, 'recovery-contracts', 'registry.json'), { contracts: {} }),
+    readJson(path.join(saviorRoot, 'recovery-contracts', 'latest-analysis.json'), null),
+    readJson(path.join(saviorRoot, 'last-savior-archives', 'latest.json'), null),
+    readJson(path.join(saviorRoot, 'recovery-jury', 'latest.json'), null),
+    readJson(path.join(saviorRoot, 'jury-promotion-gate', 'latest.json'), null),
+    readJson(path.join(saviorRoot, 'recovery-navigator', 'latest.json'), null),
+    readJson(path.join(saviorRoot, 'authority-firewall', 'head.json'), null)
+  ]);
+  const heads = { jury, gate, navigator, firewall };
+  const contracts = Object.values(registry.contracts || {});
+  const nodes = contracts.map(contract => ({
+    id: contract.id,
+    label: contract.id.replace(/-/g, ' '),
+    kind: contract.kind || 'unknown',
+    reconstructs: contract.reconstructs || [],
+    corroborates: contract.corroborates || [],
+    dependencies: contract.dependencies || [],
+    mayNominate: Boolean(contract.mayNominate),
+    mayAuthorize: Boolean(contract.mayAuthorize),
+    mayPromoteCanonical: Boolean(contract.mayPromoteCanonical),
+    present: contractPresent(contract.id, archive, heads)
+  }));
+  if (!nodes.some(node => node.id === 'last-savior')) {
+    nodes.push({ id: 'last-savior', label: 'LAST SAVIOR', kind: 'orchestrator', reconstructs: [], corroborates: ['cross-family-consistency'], dependencies: [], mayNominate: false, mayAuthorize: false, mayPromoteCanonical: false, present: Boolean(archive) });
+  }
+  const ids = new Set(nodes.map(node => node.id));
+  const edges = [];
+  for (const node of nodes) {
+    for (const dependency of node.dependencies || []) {
+      if (ids.has(dependency)) edges.push({ from: dependency, to: node.id, relation: 'depends-on' });
+    }
+  }
+  for (const node of nodes) {
+    if (node.id !== 'last-savior' && node.present && !edges.some(edge => edge.to === 'last-savior' && edge.from === node.id)) {
+      const archiveRelated = ['memory-palace','trinity-ark','quaternary-cold-codec','fountain-ark','temporal-parity','spacetime-ark','semantic-delta-fossils','semantic-hologram','shadow-laws','time-weave','crypto-council','cross-history-braid','forward-witness','recovery-contracts','rosetta-capsule','civilization-seed'].includes(node.id);
+      if (archiveRelated) edges.push({ from: node.id, to: 'last-savior', relation: 'sealed-in-archive' });
+    }
+  }
+  return {
+    format: 'JSONDB-OMEGA-OBSERVATORY-RECOVERY-GRAPH-1',
+    observedAt: new Date().toISOString(),
+    authority: 'READ_ONLY_OBSERVER',
+    contracts: {
+      registryHash: registry.registryHash || null,
+      valid: analysis?.valid ?? null,
+      violations: analysis?.violations?.length || 0
+    },
+    archive: archive ? { id: archive.id, archiveHash: archive.archiveHash, createdAt: archive.createdAt } : null,
+    nodes,
+    edges
+  };
+}
+
+async function authorityLedger() {
+  const [head, decisions] = await Promise.all([
+    readJson(path.join(saviorRoot, 'authority-firewall', 'head.json'), null),
+    tailJsonl(path.join(saviorRoot, 'authority-firewall', 'decisions.jsonl'), 120, 768 * 1024)
+  ]);
+  return {
+    format: 'JSONDB-OMEGA-OBSERVATORY-AUTHORITY-LEDGER-1',
+    observedAt: new Date().toISOString(),
+    authority: 'READ_ONLY_OBSERVER',
+    head,
+    headHash: head?.decisionHash || null,
+    decisions: decisions.filter(row => !row.__unparsed).map(row => ({
+      sequence: row.sequence,
+      at: row.at,
+      actor: row.actor,
+      action: row.action,
+      allowed: row.allowed,
+      reason: row.reason,
+      decisionHash: row.decisionHash,
+      previousDecisionHash: row.previousDecisionHash,
+      registryHash: row.recoveryContractRegistryHash || null
+    }))
   };
 }
 
@@ -348,6 +460,8 @@ const server = http.createServer(async (req, res) => {
       const result = await indexLab(url.searchParams.get('collection'));
       return sendJson(res, result.status, result.body);
     }
+    if (url.pathname === '/api/recovery-graph') return sendJson(res, 200, await recoveryGraph());
+    if (url.pathname === '/api/authority-ledger') return sendJson(res, 200, await authorityLedger());
     if (url.pathname === '/api/events') {
       res.writeHead(200, securityHeaders({
         'Content-Type': 'text/event-stream; charset=utf-8',
