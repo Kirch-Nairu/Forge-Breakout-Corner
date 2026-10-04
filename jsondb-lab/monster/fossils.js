@@ -75,7 +75,9 @@ class SemanticDeltaFossils{
     const current=await this.memory.snapshot(`${label}:fossil-endpoint`);
     if(!prior){
       const genesis={format:'JSONDB-SEMANTIC-FOSSIL-GENESIS-1',id:`${Date.now()}-genesis`,label,createdAt:now(),toMemoryId:current.id,toWorldSha256:current.worldSha256,changes:0,doctrine:'Genesis pins the first fossil endpoint. Later fossils advance from this fossil-specific tip rather than arbitrary Memory Palace activity.'};
-      await atomicJson(path.join(this.root,'latest.json'),genesis);return genesis;
+      await atomicJson(path.join(this.records,`${genesis.id}.json`),genesis);
+      await atomicJson(path.join(this.root,'latest.json'),genesis);
+      return genesis;
     }
     const [before,after]=await Promise.all([this.memoryWorld(prior.memoryId),this.memoryWorld(current.id)]);
     const changes=this.diffWorld(before,after);
@@ -94,12 +96,31 @@ class SemanticDeltaFossils{
     await atomicJson(path.join(this.records,`${record.id}.json`),record);await atomicJson(path.join(this.root,'latest.json'),record);return record;
   }
 
+  async loadRecord(id=null){
+    if(!id)return readJson(path.join(this.root,'latest.json'),null);
+    const immutable=await readJson(path.join(this.records,`${id}.json`),null);
+    if(immutable)return immutable;
+    // Backward compatibility for pre-record genesis fossils, which were historically written only as latest.json.
+    const latest=await readJson(path.join(this.root,'latest.json'),null);
+    return latest?.id===id&&latest?.format==='JSONDB-SEMANTIC-FOSSIL-GENESIS-1'?latest:null;
+  }
+
   async verify(id=null,options={}){
     const readOnly=options.readOnly===true;
     if(!readOnly)await this.init();
-    const record=id?await readJson(path.join(this.records,`${id}.json`),null):await readJson(path.join(this.root,'latest.json'),null);
+    const record=await this.loadRecord(id);
     if(!record)return{valid:false,status:'ABSENT',readOnly};
-    if(record.format==='JSONDB-SEMANTIC-FOSSIL-GENESIS-1')return{valid:true,status:'GENESIS',readOnly,record};
+    if(record.format==='JSONDB-SEMANTIC-FOSSIL-GENESIS-1'){
+      const endpoint=await this.memory.verify(record.toMemoryId,{repairPrimary:!readOnly,readOnly}).catch(error=>({valid:false,status:'ERROR',error:error.message}));
+      const endpointHashMatches=Boolean(endpoint.valid&&endpoint.reconstructedWorldSha256===record.toWorldSha256);
+      return{
+        format:'JSONDB-SEMANTIC-FOSSIL-GENESIS-VERIFY-2',id:record.id,
+        valid:endpointHashMatches,status:endpointHashMatches?'GENESIS_VALID':'GENESIS_ENDPOINT_INVALID',readOnly,
+        endpointValid:endpoint.valid===true,endpointHashMatches,
+        expectedWorldSha256:record.toWorldSha256,reconstructedWorldSha256:endpoint.reconstructedWorldSha256||null,
+        memoryId:record.toMemoryId,record
+      };
+    }
     const copy={...record};delete copy.fossilHash;const staticValid=hash(copy)===record.fossilHash;
     const forwardHash=hash(this.patchView(record.changes||[],'forward')),inverseHash=hash(this.patchView(record.changes||[],'inverse'));
     const [before,after]=await Promise.all([this.memoryWorld(record.from.memoryId,{readOnly}),this.memoryWorld(record.to.memoryId,{readOnly})]);
@@ -115,7 +136,7 @@ class SemanticDeltaFossils{
     };
   }
 
-  async reconstruct(id,direction,target){const record=await readJson(path.join(this.records,`${id}.json`),null);if(!record)throw new Error(`Fossil not found: ${id}`);const sourceId=direction==='inverse'?record.to.memoryId:record.from.memoryId;const source=await this.memoryWorld(sourceId);const world=this.apply(source,record.changes||[],direction==='inverse'?'inverse':'forward');await ensureDir(path.dirname(target));await require('fs/promises').writeFile(target,`${JSON.stringify(world,null,2)}\n`,'utf8');return{target,direction,sha256:hash(world),fossilId:id};}
+  async reconstruct(id,direction,target){const record=await this.loadRecord(id);if(!record)throw new Error(`Fossil not found: ${id}`);if(record.format==='JSONDB-SEMANTIC-FOSSIL-GENESIS-1')throw new Error('Genesis fossil is an endpoint anchor, not a reversible delta.');const sourceId=direction==='inverse'?record.to.memoryId:record.from.memoryId;const source=await this.memoryWorld(sourceId);const world=this.apply(source,record.changes||[],direction==='inverse'?'inverse':'forward');await ensureDir(path.dirname(target));await require('fs/promises').writeFile(target,`${JSON.stringify(world,null,2)}\n`,'utf8');return{target,direction,sha256:hash(world),fossilId:id};}
 }
 
 module.exports={SemanticDeltaFossils};
