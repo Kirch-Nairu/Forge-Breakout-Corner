@@ -22,6 +22,7 @@ const { RecoveryNavigator } = require('./recoverynavigator');
 const { PolicyCheckpoint } = require('./policycheckpoint');
 const { ProofCarryingRecoveryPlan } = require('./proofplan');
 const { RecoveryPlanMutationLab } = require('./planmutation');
+const { RecoveryMutationAudit } = require('./mutationaudit');
 const { LastSaviorArchive } = require('./lastsavior');
 const { RecoveryJury } = require('./recoveryjury');
 const { JuryPromotionGate } = require('./jurygate');
@@ -53,13 +54,14 @@ class FederatedOmegaKernel extends OmegaKernel {
     this.policyCheckpoint = new PolicyCheckpoint(this);
     this.proofPlan = new ProofCarryingRecoveryPlan(this);
     this.planMutation = new RecoveryPlanMutationLab(this);
+    this.mutationAudit = new RecoveryMutationAudit(this);
     this.federatedInitialized = false;
   }
 
   async init(options = {}) {
     await super.init(options);
     if (this.federatedInitialized) return this;
-    for (const system of [this.epochSealer, this.historyCourt, this.temporalParity, this.timeWeave, this.hologram, this.diaspora, this.quaternary, this.rosetta, this.shadowLaws, this.forwardWitness, this.spacetime, this.fossils, this.federation, this.recoveryContracts, this.authorityFirewall, this.lastSavior, this.recoveryJury, this.juryGate, this.recoveryGeometry, this.recoveryNavigator, this.policyCheckpoint, this.proofPlan, this.planMutation]) {
+    for (const system of [this.epochSealer, this.historyCourt, this.temporalParity, this.timeWeave, this.hologram, this.diaspora, this.quaternary, this.rosetta, this.shadowLaws, this.forwardWitness, this.spacetime, this.fossils, this.federation, this.recoveryContracts, this.authorityFirewall, this.lastSavior, this.recoveryJury, this.juryGate, this.recoveryGeometry, this.recoveryNavigator, this.policyCheckpoint, this.proofPlan, this.planMutation, this.mutationAudit]) {
       if (system && typeof system.init === 'function') await system.init();
     }
     this.federatedInitialized = true;
@@ -71,7 +73,7 @@ class FederatedOmegaKernel extends OmegaKernel {
   async status(options = {}) {
     await this.init();
     const base = await super.status(options);
-    const [weave, federation, latestEpoch, latestParity, latestCourt, latestHologram, latestDiaspora, latestQuaternary, latestRosetta, latestShadowLaws, forwardWitness, latestSpacetime, latestSpacetimePlacement, latestFossil, latestGeometry, latestContractAnalysis, firewallLedger, latestNavigator, latestPolicyCheckpoint, policyCheckpointVerify, latestProofPlan, proofPlanVerify, latestMutation, mutationVerify, latestLastSavior, latestJury, latestWarrant] = await Promise.all([
+    const [weave, federation, latestEpoch, latestParity, latestCourt, latestHologram, latestDiaspora, latestQuaternary, latestRosetta, latestShadowLaws, forwardWitness, latestSpacetime, latestSpacetimePlacement, latestFossil, latestGeometry, latestContractAnalysis, firewallLedger, latestNavigator, latestPolicyCheckpoint, policyCheckpointVerify, latestProofPlan, proofPlanVerify, latestMutation, mutationVerify, mutationAudit, latestLastSavior, latestJury, latestWarrant] = await Promise.all([
       this.timeWeave.verifyAll().catch(error => ({ valid: false, error: error.message })),
       this.federation.verify(null, { live: false }).catch(error => ({ valid: false, status: 'ABSENT', error: error.message })),
       readJson(path.join(this.epochSealer.root, 'latest.json'), null),
@@ -96,13 +98,14 @@ class FederatedOmegaKernel extends OmegaKernel {
       this.proofPlan.verify().catch(error => ({ valid: false, status: 'ABSENT', error: error.message })),
       readJson(path.join(this.planMutation.root, 'latest.json'), null),
       this.planMutation.verify().catch(error => ({ valid: false, status: 'ABSENT', error: error.message })),
+      this.mutationAudit.verify().catch(error => ({ valid: false, status: 'ABSENT', error: error.message })),
       readJson(path.join(this.lastSavior.root, 'latest.json'), null),
       readJson(path.join(this.recoveryJury.root, 'latest.json'), null),
       readJson(path.join(this.juryGate.root, 'latest.json'), null)
     ]);
     return {
       ...base,
-      format: 'JSONDB-FEDERATED-OMEGA-KERNEL-STATUS-16',
+      format: 'JSONDB-FEDERATED-OMEGA-KERNEL-STATUS-17',
       historicalSurvival: {
         latestOmegaEpoch: latestEpoch ? { id: latestEpoch.id, epochHash: latestEpoch.epochHash, semanticWorldSha256: latestEpoch.semanticWorldSha256 } : null,
         timeWeave: { valid: weave.valid, nodes: weave.nodes, invalidNodes: weave.invalid?.length || 0 },
@@ -112,11 +115,12 @@ class FederatedOmegaKernel extends OmegaKernel {
         semanticDeltaFossil: latestFossil ? { id: latestFossil.id, format: latestFossil.format, changeCount: latestFossil.changeCount ?? latestFossil.changes, from: latestFossil.from || null, to: latestFossil.to || { memoryId: latestFossil.toMemoryId } } : null,
         recoveryGeometry: latestGeometry ? latestGeometry.summary : null,
         recoveryContracts: latestContractAnalysis ? { valid: latestContractAnalysis.valid, registryHash: latestContractAnalysis.registryHash, violations: latestContractAnalysis.violations?.length || 0, contracts: latestContractAnalysis.summary?.contracts } : null,
-        authorityFirewall: { valid: firewallLedger.valid, decisions: firewallLedger.decisions, headHash: firewallLedger.headHash, failures: firewallLedger.failures?.length || 0 },
+        authorityFirewall: { valid: firewallLedger.valid, fullyPolicyReplayable: firewallLedger.fullyPolicyReplayable, decisions: firewallLedger.decisions, policyReplayedDecisions: firewallLedger.policyReplayedDecisions, legacyUnboundDecisions: firewallLedger.legacyUnboundDecisions, headHash: firewallLedger.headHash, failures: firewallLedger.failures?.length || 0 },
         recoveryNavigator: latestNavigator ? { id: latestNavigator.id, status: latestNavigator.status, goal: latestNavigator.goal, source: latestNavigator.source?.id || null, blockers: latestNavigator.blockers?.length || 0 } : null,
-        policyCheckpoint: latestPolicyCheckpoint ? { id: latestPolicyCheckpoint.id, checkpointHash: latestPolicyCheckpoint.checkpointHash, firewallHead: latestPolicyCheckpoint.firewall?.headHash || null, valid: policyCheckpointVerify.valid } : null,
-        proofCarryingRecoveryPlan: latestProofPlan ? { id: latestProofPlan.id, dossierHash: latestProofPlan.dossierHash, goal: latestProofPlan.navigator?.goal || null, source: latestProofPlan.navigator?.source?.id || null, valid: proofPlanVerify.valid } : null,
-        recoveryPlanMutation: latestMutation ? { id: latestMutation.id, mutationHash: latestMutation.mutationHash, goal: latestMutation.goal, summary: latestMutation.summary, valid: mutationVerify.valid } : null,
+        policyCheckpoint: latestPolicyCheckpoint ? { id: latestPolicyCheckpoint.id, checkpointHash: latestPolicyCheckpoint.checkpointHash, firewallHead: latestPolicyCheckpoint.firewall?.headHash || null, valid: policyCheckpointVerify.valid, policyDriftedSinceCheckpoint: policyCheckpointVerify.policyDriftedSinceCheckpoint } : null,
+        proofCarryingRecoveryPlan: latestProofPlan ? { id: latestProofPlan.id, dossierHash: latestProofPlan.dossierHash, goal: latestProofPlan.navigator?.goal || null, source: latestProofPlan.navigator?.source?.id || null, valid: proofPlanVerify.valid, policyDriftedSinceDossier: proofPlanVerify.policyDriftedSinceDossier } : null,
+        recoveryPlanMutation: latestMutation ? { id: latestMutation.id, mutationHash: latestMutation.mutationHash, goal: latestMutation.goal, summary: latestMutation.summary, artifactValid: mutationVerify.valid, independentAuditValid: mutationAudit.valid } : null,
+        recoveryMutationAudit: mutationAudit.status === 'ABSENT' ? null : { valid: mutationAudit.valid, mutationArtifactValid: mutationAudit.mutationArtifactValid, baselineValid: mutationAudit.baselineValid, replayValid: mutationAudit.replayValid, summaryMatches: mutationAudit.summaryMatches, recomputedUnsafe: mutationAudit.recomputedUnsafe },
         federation: { valid: federation.valid, id: federation.id, staticValid: federation.staticValid, error: federation.error },
         latestHistoryCourt: latestCourt ? { id: latestCourt.id, verdict: latestCourt.verdict, caseHash: latestCourt.caseHash } : null,
         semanticHologram: latestHologram ? { id: latestHologram.id, hologramHash: latestHologram.hologramHash, capturedAt: latestHologram.capturedAt } : null,
