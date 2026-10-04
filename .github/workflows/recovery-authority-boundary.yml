@@ -1,0 +1,218 @@
+name: Recovery Authority Boundary
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'jsondb-lab/**'
+      - '.github/workflows/recovery-authority-boundary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recovery-authority-boundary-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  authority-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Syntax-check JSONDB lab JavaScript
+        shell: bash
+        run: |
+          set -euo pipefail
+          find jsondb-lab -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: Exercise machine and human recovery authority boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fsp = require('fs/promises');
+          const path = require('path');
+          const crypto = require('crypto');
+          const { FederatedOmegaKernel } = require('./jsondb-lab/monster/federated-kernel');
+
+          function sha(value) {
+            return crypto.createHash('sha256').update(value).digest('hex');
+          }
+
+          async function treeEvidence(root) {
+            const rows = [];
+            async function walk(target, rel = '.') {
+              let stat;
+              try { stat = await fsp.lstat(target); }
+              catch (error) {
+                if (error.code === 'ENOENT') return;
+                throw error;
+              }
+              if (stat.isDirectory()) {
+                const entries = await fsp.readdir(target, { withFileTypes: true });
+                entries.sort((a, b) => a.name.localeCompare(b.name));
+                for (const entry of entries) await walk(path.join(target, entry.name), path.join(rel, entry.name));
+                return;
+              }
+              if (stat.isFile()) {
+                const body = await fsp.readFile(target);
+                rows.push({ path: rel.split(path.sep).join('/'), bytes: body.length, sha256: sha(body) });
+                return;
+              }
+              if (stat.isSymbolicLink()) rows.push({ path: rel.split(path.sep).join('/'), symlink: await fsp.readlink(target) });
+            }
+            await walk(root);
+            rows.sort((a, b) => a.path.localeCompare(b.path));
+            return { rows, digest: sha(Buffer.from(JSON.stringify(rows))) };
+          }
+
+          async function main() {
+            const kernel = new FederatedOmegaKernel(path.join(process.cwd(), 'jsondb-lab'));
+            await kernel.init();
+
+            const archive = await kernel.lastSavior.create('ci-authority-boundary', {
+              scatter: false,
+              deepMedia: false,
+              verifyArchives: false,
+              monteCarloIterations: 250,
+              syndromeChecksPerNode: 2,
+              shadowLawsPerCollection: 2,
+              hologramWidth: 16,
+              hologramProjections: 2,
+              oligoBytes: 128,
+              oligoGroupSize: 4,
+              spacetimeEpochs: 2,
+              spacetimeColumns: 2
+            });
+            if (!archive?.id) throw new Error('Authority-boundary LAST SAVIOR fixture creation failed.');
+
+            const beforeWorld = await kernel.world();
+            const beforeCanonical = await kernel.canonicalQuorum.verify(beforeWorld, { readOnly: true, freezeOnDivergence: false });
+            if (!beforeCanonical.unanimous) throw new Error('Pre-ceremony canonicalization quorum diverged.');
+            const beforeStorage = await treeEvidence(kernel.engine.data);
+
+            const directCases = [
+              ['recovery-navigator', 'PRESERVE_EVIDENCE', true],
+              ['recovery-jury', 'NOMINATE_CANDIDATE', true],
+              ['jury-promotion-gate', 'OPEN_PROMOTION_CEREMONY', true],
+              ['promotion-ceremony', 'AUTHORIZE_INTENT', true],
+              ['recovery-navigator', 'OPEN_PROMOTION_CEREMONY', false],
+              ['recovery-navigator', 'AUTHORIZE_INTENT', false],
+              ['recovery-navigator', 'PROMOTE_CANONICAL', false],
+              ['recovery-jury', 'PROMOTE_CANONICAL', false],
+              ['jury-promotion-gate', 'PROMOTE_CANONICAL', false],
+              ['promotion-ceremony', 'PROMOTE_CANONICAL', false],
+              ['recovery-jury', 'WRITE_CANONICAL_RECOVERY', false],
+              ['promotion-ceremony', 'WRITE_CANONICAL_RECOVERY', false],
+              ['recovery-jury', 'SILENTLY_RAISE_AUTHORITY', false],
+              ['promotion-ceremony', 'SILENTLY_RAISE_AUTHORITY', false]
+            ];
+            const firewall = [];
+            for (const [actor, action, expectedAllowed] of directCases) {
+              const decision = await kernel.authorityFirewall.decide(actor, action, { purpose: 'ci-authority-boundary' });
+              firewall.push({ actor, action, expectedAllowed, allowed: decision.allowed, reason: decision.reason, sequence: decision.sequence, decisionHash: decision.decisionHash });
+              if (decision.allowed !== expectedAllowed) {
+                throw new Error(`Authority Firewall mismatch for ${actor} -> ${action}: expected ${expectedAllowed}, got ${decision.allowed}`);
+              }
+            }
+
+            const sandboxFile = path.join(process.cwd(), 'ci-recovery-candidate.json');
+            await fsp.writeFile(sandboxFile, `${JSON.stringify(beforeWorld, null, 2)}\n`, 'utf8');
+
+            const jury = await kernel.recoveryJury.deliberate(sandboxFile, { archiveId: archive.id });
+            const juryVerify = await kernel.recoveryJury.verify(jury.id);
+            if (!juryVerify.valid) throw new Error('Recovery Jury fixture failed verification.');
+            if (jury.verdict !== 'EXACT') throw new Error(`Expected EXACT Jury verdict, got ${jury.verdict}.`);
+
+            const gate = await kernel.juryGate.open(jury.id, { expiresMinutes: 30, target: 'canonical-world' });
+            const gateBeforeApprovals = await kernel.juryGate.verify(gate.warrant.id);
+            if (!gateBeforeApprovals.valid) throw new Error('Jury Promotion Gate warrant failed verification before approvals.');
+            if (gateBeforeApprovals.promotion.authorized) throw new Error('Promotion unexpectedly authorized before human threshold approvals.');
+
+            const operators = await kernel.promotion.init();
+            const threshold = Number(operators.threshold || 0);
+            const active = (operators.operators || []).filter(x => !x.revokedAt);
+            if (threshold < 2 || active.length < threshold) throw new Error('Promotion operator threshold fixture is not usable.');
+
+            const approvalResults = [];
+            for (const operator of active.slice(0, threshold)) {
+              const result = await kernel.promotion.approve(gate.proposal.id, operator.id);
+              approvalResults.push({ operatorId: operator.id, authorized: result.authorized, validApprovals: result.validApprovals, threshold: result.threshold });
+            }
+
+            const promotion = await kernel.promotion.verify(gate.proposal.id);
+            if (!promotion.authorized || promotion.status !== 'AUTHORIZED_MANUAL_PROMOTION') {
+              throw new Error('Human threshold ceremony failed to authorize intent.');
+            }
+            const certificate = await kernel.promotion.certificate(gate.proposal.id);
+            if (certificate.executable !== false) throw new Error('Promotion certificate became executable.');
+            const gateAfterApprovals = await kernel.juryGate.verify(gate.warrant.id);
+            if (!gateAfterApprovals.valid || gateAfterApprovals.status !== 'HUMAN_THRESHOLD_AUTHORIZED') {
+              throw new Error('Jury Promotion Gate did not report human-threshold authorization.');
+            }
+
+            const postCeremonyDenials = [];
+            for (const [actor, action] of [
+              ['promotion-ceremony', 'PROMOTE_CANONICAL'],
+              ['promotion-ceremony', 'WRITE_CANONICAL_RECOVERY'],
+              ['jury-promotion-gate', 'PROMOTE_CANONICAL'],
+              ['recovery-jury', 'PROMOTE_CANONICAL']
+            ]) {
+              const decision = await kernel.authorityFirewall.decide(actor, action, { purpose: 'ci-post-human-threshold' });
+              postCeremonyDenials.push({ actor, action, allowed: decision.allowed, reason: decision.reason, sequence: decision.sequence, decisionHash: decision.decisionHash });
+              if (decision.allowed) throw new Error(`Authority escalated after human threshold: ${actor} -> ${action}`);
+            }
+
+            const afterWorld = await kernel.world();
+            const afterCanonical = await kernel.canonicalQuorum.verify(afterWorld, { readOnly: true, freezeOnDivergence: false });
+            const afterStorage = await treeEvidence(kernel.engine.data);
+            const firewallCheck = await kernel.authorityFirewall.verifyLedger({ readOnly: true });
+
+            const assertions = {
+              exactJuryVerdict: jury.verdict === 'EXACT' && juryVerify.valid === true,
+              gateOpenedButDidNotAuthorizeEarly: gateBeforeApprovals.valid === true && gateBeforeApprovals.promotion.authorized === false,
+              humanThresholdAuthorizedIntent: promotion.authorized === true && gateAfterApprovals.status === 'HUMAN_THRESHOLD_AUTHORIZED',
+              certificateNonExecutable: certificate.executable === false,
+              allMachinePromotionAttemptsDenied: firewall.filter(x => ['PROMOTE_CANONICAL','WRITE_CANONICAL_RECOVERY','SILENTLY_RAISE_AUTHORITY'].includes(x.action)).every(x => x.allowed === false),
+              postThresholdPromotionStillDenied: postCeremonyDenials.every(x => x.allowed === false),
+              canonicalSemanticStateUnchanged: beforeCanonical.semanticSha256 === afterCanonical.semanticSha256,
+              canonicalStorageBytesUnchanged: beforeStorage.digest === afterStorage.digest,
+              firewallLedgerValid: firewallCheck.valid === true
+            };
+
+            const report = {
+              archiveId: archive.id,
+              jury: { id: jury.id, verdict: jury.verdict, confidence: jury.confidence, valid: juryVerify.valid },
+              gate: { warrantId: gate.warrant.id, proposalId: gate.proposal.id, beforeApprovals: gateBeforeApprovals.status, afterApprovals: gateAfterApprovals.status },
+              ceremony: { threshold, approvals: approvalResults, authorized: promotion.authorized, certificateId: certificate.certificateId, certificateExecutable: certificate.executable },
+              canonical: {
+                beforeSemanticSha256: beforeCanonical.semanticSha256,
+                afterSemanticSha256: afterCanonical.semanticSha256,
+                beforeStorageDigest: beforeStorage.digest,
+                afterStorageDigest: afterStorage.digest
+              },
+              assertions,
+              firewall,
+              postCeremonyDenials
+            };
+            process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+
+            const failed = Object.entries(assertions).filter(([, ok]) => !ok).map(([name]) => name);
+            if (failed.length) throw new Error(`Recovery authority boundary assertions failed: ${failed.join(', ')}`);
+          }
+
+          main().catch(error => {
+            console.error(error.stack || error);
+            process.exitCode = 1;
+          });
+          NODE
