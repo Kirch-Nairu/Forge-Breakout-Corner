@@ -2,7 +2,7 @@
 
 const path = require('path');
 const crypto = require('crypto');
-const { now, ensureDir, readJson, atomicJson } = require('./jsonfs');
+const { now, ensureDir, readJson, readJsonl, atomicJson } = require('./jsonfs');
 
 function digest(value) { return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
 
@@ -29,7 +29,7 @@ class PolicyCheckpoint {
     if (!contracts.valid) throw new Error('Policy Checkpoint refuses to attest invalid Recovery Contracts.');
 
     const core = {
-      format: 'JSONDB-POLICY-CHECKPOINT-1',
+      format: 'JSONDB-POLICY-CHECKPOINT-2',
       id: `${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
       label,
       at: now(),
@@ -39,7 +39,7 @@ class PolicyCheckpoint {
       navigator: navigator ? { id: navigator.id, planHash: navigator.planHash, status: navigator.status, goal: navigator.goal || null } : null,
       lastSavior: lastSavior ? { id: lastSavior.id, archiveHash: lastSavior.archiveHash } : null,
       timeWeave: weave ? { epochId: weave.epochId, weaveHash: weave.weaveHash, position: weave.position } : null,
-      doctrine: 'This checkpoint binds recovery-policy history to independent signature families and the forward-evolving witness chain. It grants no new authority.'
+      doctrine: 'This checkpoint binds an exact Authority Firewall ledger prefix to independent signature families and the forward-evolving witness chain. It grants no new authority.'
     };
     const coreHash = digest(core);
     const [cryptoAttestation, forwardAttestation] = await Promise.all([
@@ -67,17 +67,23 @@ class PolicyCheckpoint {
     const coreCopy = { ...record };
     delete coreCopy.coreHash; delete coreCopy.cryptoCouncil; delete coreCopy.forwardWitness; delete coreCopy.checkpointHash;
     const computedCoreHash = digest(coreCopy);
-    const [crypto, forward, firewall] = await Promise.all([
+    const [crypto, forward, firewall, ledger] = await Promise.all([
       this.k.cryptoCouncil.verify(record.cryptoCouncil?.id).catch(error => ({ valid: false, error: error.message })),
       this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
-      this.k.authorityFirewall.verifyLedger().catch(error => ({ valid: false, error: error.message }))
+      this.k.authorityFirewall.verifyLedger().catch(error => ({ valid: false, error: error.message })),
+      readJsonl(this.k.authorityFirewall.ledger).catch(() => [])
     ]);
     const forwardRecord = forward.results?.find(x => x.sequence === record.forwardWitness?.sequence) || null;
     const forwardValid = Boolean(forward.valid && forwardRecord?.valid && forwardRecord.subjectHash === record.coreHash && forwardRecord.attestationHash === record.forwardWitness.attestationHash);
     const cryptoValid = Boolean(crypto.valid && crypto.worldRoot === record.coreHash && Number(crypto.familyQuorum || 0) >= 2);
-    const liveLedgerDescends = firewall.valid && Number(firewall.decisions || 0) >= Number(record.firewall?.decisions || 0);
+    const checkpointCount = Number(record.firewall?.decisions || 0);
+    const prefixRow = checkpointCount > 0 ? ledger[checkpointCount - 1] : null;
+    const prefixHeadMatches = checkpointCount === 0
+      ? record.firewall?.headHash == null
+      : Boolean(prefixRow && !prefixRow.__corrupt && prefixRow.sequence === checkpointCount && prefixRow.decisionHash === record.firewall?.headHash);
+    const liveLedgerDescends = Boolean(firewall.valid && ledger.length >= checkpointCount && prefixHeadMatches);
     return {
-      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-1',
+      format: 'JSONDB-POLICY-CHECKPOINT-VERIFY-2',
       id: record.id,
       valid: computedCheckpointHash === record.checkpointHash && computedCoreHash === record.coreHash && cryptoValid && forwardValid && liveLedgerDescends,
       staticValid: computedCheckpointHash === record.checkpointHash,
@@ -85,10 +91,13 @@ class PolicyCheckpoint {
       cryptoCouncilValid: cryptoValid,
       forwardWitnessValid: forwardValid,
       liveFirewallLedgerValid: firewall.valid,
+      checkpointDecisionCount: checkpointCount,
+      liveDecisionCount: ledger.length,
+      prefixHeadMatches,
       liveLedgerDescends,
       checkpointFirewallHead: record.firewall?.headHash || null,
       liveFirewallHead: firewall.headHash || null,
-      caveat: 'A later valid firewall ledger may have additional decisions. This verifies the checkpointed prefix by count/head binding only through the stored checkpoint attestation; it does not imply later decisions existed at checkpoint time.'
+      doctrine: 'A later ledger is accepted only when the exact decision at the checkpoint sequence still has the checkpointed head hash.'
     };
   }
 }
