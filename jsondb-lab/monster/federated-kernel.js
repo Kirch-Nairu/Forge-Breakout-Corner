@@ -13,6 +13,7 @@ const { QuaternaryColdCodec } = require('./quaternary');
 const { RosettaCapsule } = require('./rosetta');
 const { ShadowLawEngine } = require('./shadowlaws');
 const { ForwardWitnessRatchet } = require('./forwardwitness');
+const { SpacetimeArk } = require('./spacetimeark');
 const { LastSaviorArchive } = require('./lastsavior');
 const { RecoveryJury } = require('./recoveryjury');
 const { JuryPromotionGate } = require('./jurygate');
@@ -39,6 +40,7 @@ class FederatedOmegaKernel extends OmegaKernel {
     this.rosetta = new RosettaCapsule({ savior: this.savior, polyhash: this.polyhash });
     this.shadowLaws = new ShadowLawEngine({ engine: this.engine, savior: this.savior, cryptoCouncil: this.cryptoCouncil });
     this.forwardWitness = new ForwardWitnessRatchet(this.savior);
+    this.spacetime = new SpacetimeArk({ savior: this.savior, omegaEpochRoot: this.epochSealer.root, constellation: this.constellation });
     this.federation = new OmegaFederation({
       savior: this.savior,
       epochSealer: this.epochSealer,
@@ -58,7 +60,7 @@ class FederatedOmegaKernel extends OmegaKernel {
   async init(options = {}) {
     await super.init(options);
     if (this.federatedInitialized) return this;
-    for (const system of [this.epochSealer, this.historyCourt, this.temporalParity, this.timeWeave, this.hologram, this.diaspora, this.quaternary, this.rosetta, this.shadowLaws, this.forwardWitness, this.federation, this.lastSavior, this.recoveryJury, this.juryGate]) {
+    for (const system of [this.epochSealer, this.historyCourt, this.temporalParity, this.timeWeave, this.hologram, this.diaspora, this.quaternary, this.rosetta, this.shadowLaws, this.forwardWitness, this.spacetime, this.federation, this.lastSavior, this.recoveryJury, this.juryGate]) {
       if (system && typeof system.init === 'function') await system.init();
     }
     this.federatedInitialized = true;
@@ -73,7 +75,7 @@ class FederatedOmegaKernel extends OmegaKernel {
   async status(options = {}) {
     await this.init();
     const base = await super.status(options);
-    const [weave, federation, latestEpoch, latestParity, latestCourt, latestHologram, latestDiaspora, latestQuaternary, latestRosetta, latestShadowLaws, forwardWitness, latestLastSavior, latestJury, latestWarrant] = await Promise.all([
+    const [weave, federation, latestEpoch, latestParity, latestCourt, latestHologram, latestDiaspora, latestQuaternary, latestRosetta, latestShadowLaws, forwardWitness, latestSpacetime, latestSpacetimePlacement, latestLastSavior, latestJury, latestWarrant] = await Promise.all([
       this.timeWeave.verifyAll().catch(error => ({ valid: false, error: error.message })),
       this.federation.verify(null, { live: false }).catch(error => ({ valid: false, status: 'ABSENT', error: error.message })),
       readJson(path.join(this.epochSealer.root, 'latest.json'), null),
@@ -85,17 +87,21 @@ class FederatedOmegaKernel extends OmegaKernel {
       readJson(path.join(this.rosetta.root, 'latest.json'), null),
       readJson(path.join(this.shadowLaws.root, 'latest.json'), null),
       this.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
+      readJson(path.join(this.spacetime.root, 'latest.json'), null),
+      readJson(path.join(this.spacetime.root, 'latest-placement.json'), null),
       readJson(path.join(this.lastSavior.root, 'latest.json'), null),
       readJson(path.join(this.recoveryJury.root, 'latest.json'), null),
       readJson(path.join(this.juryGate.root, 'latest.json'), null)
     ]);
     return {
       ...base,
-      format: 'JSONDB-FEDERATED-OMEGA-KERNEL-STATUS-8',
+      format: 'JSONDB-FEDERATED-OMEGA-KERNEL-STATUS-9',
       historicalSurvival: {
         latestOmegaEpoch: latestEpoch ? { id: latestEpoch.id, epochHash: latestEpoch.epochHash, semanticWorldSha256: latestEpoch.semanticWorldSha256 } : null,
         timeWeave: { valid: weave.valid, nodes: weave.nodes, invalidNodes: weave.invalid?.length || 0 },
         temporalParity: latestParity,
+        spacetimeArk: latestSpacetime,
+        spacetimePlacement: latestSpacetimePlacement ? { id: latestSpacetimePlacement.id, distinctDeviceKeys: latestSpacetimePlacement.distinctDeviceKeys, placements: latestSpacetimePlacement.placements?.length || 0 } : null,
         federation: { valid: federation.valid, id: federation.id, staticValid: federation.staticValid, error: federation.error },
         latestHistoryCourt: latestCourt ? { id: latestCourt.id, verdict: latestCourt.verdict, caseHash: latestCourt.caseHash } : null,
         semanticHologram: latestHologram ? { id: latestHologram.id, hologramHash: latestHologram.hologramHash, capturedAt: latestHologram.capturedAt } : null,
