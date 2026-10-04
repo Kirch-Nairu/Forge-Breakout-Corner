@@ -15,7 +15,7 @@ class LastSaviorArchive {
 
   async init() { await ensureDir(this.receipts); }
 
-  async evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness, spacetime }) {
+  async evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness, spacetime, fossil }) {
     const rows = [];
     const add = (name, p) => { if (p) rows.push({ name, path: p }); };
     add('FEDERATION-RECEIPT.json', path.join(this.k.federation.receipts, `${federation.id}.json`));
@@ -27,6 +27,7 @@ class LastSaviorArchive {
     if (shadowLaws?.id) add('SHADOW-LAWS.json', path.join(this.k.shadowLaws.records, `${shadowLaws.id}.json`));
     if (forwardWitness?.statement?.sequence) add('FORWARD-WITNESS.json', path.join(this.k.forwardWitness.records, `${String(forwardWitness.statement.sequence).padStart(10,'0')}.json`));
     if (spacetime?.id) add('SPACETIME-ARK', path.join(this.k.spacetime.generations, spacetime.id));
+    if (fossil?.id) add('SEMANTIC-FOSSIL.json', fossil.format === 'JSONDB-SEMANTIC-FOSSIL-GENESIS-1' ? path.join(this.k.fossils.root, 'latest.json') : path.join(this.k.fossils.records, `${fossil.id}.json`));
     add('ROSETTA-CAPSULE', rosetta.directory);
     add('QUATERNARY-COLD-STORAGE', path.join(this.k.quaternary.generations, quaternary.generation));
     add('CIVILIZATION-SEED', seed.directory);
@@ -55,19 +56,14 @@ class LastSaviorArchive {
     const shadowLaws = await this.k.shadowLaws.capture(`${label}:shadow-laws`, { lawsPerCollection: Number(options.shadowLawsPerCollection || 12) });
     const rosetta = await this.k.rosetta.create(`${label}:rosetta`);
     const world = await this.k.world();
-    const quaternary = await this.k.quaternary.archiveBuffer(`${label}:quaternary`, Buffer.from(JSON.stringify(world)), {
-      oligoBytes: Number(options.oligoBytes || 512),
-      groupSize: Number(options.oligoGroupSize || 8)
-    });
+    const quaternary = await this.k.quaternary.archiveBuffer(`${label}:quaternary`, Buffer.from(JSON.stringify(world)), { oligoBytes: Number(options.oligoBytes || 512), groupSize: Number(options.oligoGroupSize || 8) });
     const seed = await this.k.civilizationSeed.create(`${label}:civilization-seed`);
+    const fossil = await this.k.fossils.capture(`${label}:fossil`);
 
     let spacetime = null;
     let spacetimePlacement = null;
     try {
-      spacetime = await this.k.spacetime.seal(`${label}:spacetime`, {
-        epochs: Number(options.spacetimeEpochs || 8),
-        dataColumns: Number(options.spacetimeColumns || 6)
-      });
+      spacetime = await this.k.spacetime.seal(`${label}:spacetime`, { epochs: Number(options.spacetimeEpochs || 8), dataColumns: Number(options.spacetimeColumns || 6) });
       if (options.scatter !== false) {
         try {
           const assessment = await this.k.constellation.assess();
@@ -75,22 +71,13 @@ class LastSaviorArchive {
           else spacetimePlacement = { status:'DEFERRED', reason:'No registered media for Spacetime placement.' };
         } catch (error) { spacetimePlacement = { status:'DEFERRED', reason:error.message }; }
       }
-    } catch (error) {
-      spacetime = { status:'DEFERRED', reason:error.message };
-    }
+    } catch (error) { spacetime = { status:'DEFERRED', reason:error.message }; }
 
-    // Build the archive core first. The forward witness signs this stable core hash.
     const archiveCore = {
-      format: 'JSONDB-LAST-SAVIOR-ARCHIVE-4',
+      format: 'JSONDB-LAST-SAVIOR-ARCHIVE-5',
       id: `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`,
       label, createdAt: now(),
-      world: {
-        semanticSha256: federation.omegaEpoch.semanticWorldSha256,
-        federationId: federation.id,
-        omegaEpochId: federation.omegaEpoch.id,
-        omegaEpochHash: federation.omegaEpoch.epochHash,
-        worldTreeCommit: federation.worldTree.commit
-      },
+      world: { semanticSha256: federation.omegaEpoch.semanticWorldSha256, federationId: federation.id, omegaEpochId: federation.omegaEpoch.id, omegaEpochHash: federation.omegaEpoch.epochHash, worldTreeCommit: federation.worldTree.commit },
       recoveryFamilies: {
         civilizationSeed: seed.id,
         rosettaCapsule: rosetta.id,
@@ -98,6 +85,7 @@ class LastSaviorArchive {
         temporalParity: federation.temporalParity?.id || null,
         spacetimeArk: spacetime?.id || null,
         spacetimePlacement,
+        semanticFossil: { id:fossil.id, format:fossil.format, from:fossil.from||null, to:fossil.to||{memoryId:fossil.toMemoryId,worldSha256:fossil.toWorldSha256} },
         memoryPalace: (await readJson(path.join(this.k.memory.root, 'latest.json'), null))?.id || null,
         trinity: (await readJson(path.join(this.k.trinity.root, 'latest.json'), null))?.id || null,
         fountain: (await readJson(path.join(this.k.fountain.root, 'latest.json'), null))?.generation || null
@@ -115,6 +103,7 @@ class LastSaviorArchive {
         'No single decoder family is sufficient promotion authority.',
         'Holograms and randomized Shadow Laws corroborate reconstructions without serving as their recovery source.',
         'Spacetime ARK adds a 2-D erasure product code across storage shards and historical epochs when enough history exists.',
+        'Semantic Delta Fossils provide reversible row-aware transitions between fossil-specific Memory Palace endpoints.',
         'Forward Witness Ratchet gives historical attestations an evolving signing identity; old private keys are removed from active state but filesystem secure erasure is not guaranteed.',
         'Recovered data is restored into a sandbox first.',
         'Divergent defensible histories are preserved, not silently collapsed.',
@@ -122,21 +111,13 @@ class LastSaviorArchive {
       ]
     };
     const coreHash = digest(archiveCore);
-    const forwardWitness = await this.k.forwardWitness.attest(coreHash, {
-      purpose: 'last-savior-core', archiveId: archiveCore.id,
-      federationId: federation.id, omegaEpochId: federation.omegaEpoch.id
-    });
+    const forwardWitness = await this.k.forwardWitness.attest(coreHash, { purpose: 'last-savior-core', archiveId: archiveCore.id, federationId: federation.id, omegaEpochId: federation.omegaEpoch.id });
 
-    const bundle = await this.k.diaspora.createBundle(`${label}:evidence`, await this.evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness, spacetime }), {
-      federationId: federation.id,
-      omegaEpochId: federation.omegaEpoch.id,
-      shadowLawId: shadowLaws.id,
-      forwardWitnessSequence: forwardWitness.statement.sequence,
-      forwardWitnessHash: forwardWitness.attestationHash,
-      quaternaryGeneration: quaternary.generation,
-      spacetimeGeneration: spacetime?.id || null,
-      rosettaId: rosetta.id,
-      civilizationSeedId: seed.id
+    const bundle = await this.k.diaspora.createBundle(`${label}:evidence`, await this.evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness, spacetime, fossil }), {
+      federationId: federation.id, omegaEpochId: federation.omegaEpoch.id, shadowLawId: shadowLaws.id,
+      forwardWitnessSequence: forwardWitness.statement.sequence, forwardWitnessHash: forwardWitness.attestationHash,
+      quaternaryGeneration: quaternary.generation, spacetimeGeneration: spacetime?.id || null, fossilId:fossil.id,
+      rosettaId: rosetta.id, civilizationSeedId: seed.id
     });
 
     let diaspora = null;
@@ -148,19 +129,7 @@ class LastSaviorArchive {
       } catch (error) { diaspora = { status: 'DEFERRED', reason: error.message }; }
     }
 
-    const receipt = {
-      ...archiveCore,
-      coreHash,
-      forwardWitness: {
-        sequence: forwardWitness.statement.sequence,
-        subjectHash: forwardWitness.statement.subjectHash,
-        signingKeyFingerprint: forwardWitness.statement.signingKeyFingerprint,
-        nextKeyFingerprint: forwardWitness.statement.nextKeyFingerprint,
-        attestationHash: forwardWitness.attestationHash
-      },
-      evidenceBundle: { id: bundle.id, merkleRoot: bundle.manifest.merkleRoot, bundleHash: bundle.bundleHash },
-      physicalDiaspora: diaspora
-    };
+    const receipt = { ...archiveCore, coreHash, forwardWitness: { sequence: forwardWitness.statement.sequence, subjectHash: forwardWitness.statement.subjectHash, signingKeyFingerprint: forwardWitness.statement.signingKeyFingerprint, nextKeyFingerprint: forwardWitness.statement.nextKeyFingerprint, attestationHash: forwardWitness.attestationHash }, evidenceBundle: { id: bundle.id, merkleRoot: bundle.manifest.merkleRoot, bundleHash: bundle.bundleHash }, physicalDiaspora: diaspora };
     receipt.archiveHash = digest(receipt);
     receipt.polyhash = await this.k.polyhash.envelope(receipt, { purpose: 'last-savior-archive' });
     await atomicJson(path.join(this.receipts, `${receipt.id}.json`), receipt);
@@ -173,56 +142,36 @@ class LastSaviorArchive {
     const receipt = id ? await readJson(path.join(this.receipts, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
     if (!receipt) return { valid: false, status: 'ABSENT' };
     const copy = { ...receipt }; delete copy.archiveHash; delete copy.polyhash;
-    const computed = digest(copy);
-    const staticValid = computed === receipt.archiveHash;
+    const computed = digest(copy); const staticValid = computed === receipt.archiveHash;
+    const coreCopy = { ...receipt }; delete coreCopy.coreHash; delete coreCopy.forwardWitness; delete coreCopy.evidenceBundle; delete coreCopy.physicalDiaspora; delete coreCopy.archiveHash; delete coreCopy.polyhash;
+    const computedCoreHash = digest(coreCopy); const coreValid = computedCoreHash === receipt.coreHash;
 
-    const coreCopy = { ...receipt };
-    delete coreCopy.coreHash; delete coreCopy.forwardWitness; delete coreCopy.evidenceBundle; delete coreCopy.physicalDiaspora; delete coreCopy.archiveHash; delete coreCopy.polyhash;
-    const computedCoreHash = digest(coreCopy);
-    const coreValid = computedCoreHash === receipt.coreHash;
-
-    const [federation, rosetta, seed, quaternary, shadowRecord, forwardChain, spacetime] = await Promise.all([
+    const [federation, rosetta, seed, quaternary, shadowRecord, forwardChain, spacetime, fossil] = await Promise.all([
       this.k.federation.verify(receipt.world.federationId, { live: options.live === true }).catch(error => ({ valid: false, error: error.message })),
       this.k.rosetta.verify(receipt.recoveryFamilies.rosettaCapsule).catch(error => ({ valid: false, error: error.message })),
       this.k.civilizationSeed.verify(receipt.recoveryFamilies.civilizationSeed).catch(error => ({ valid: false, error: error.message })),
       this.k.quaternary.recover(receipt.recoveryFamilies.quaternaryGeneration).catch(error => ({ status: 'ERROR', error: error.message })),
       this.k.shadowLaws.verifyRecord(receipt.corroborationFamilies?.shadowLaws?.id || null).catch(error => ({ valid: false, error: error.message })),
       this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
-      receipt.recoveryFamilies?.spacetimeArk ? this.k.spacetime.recover(receipt.recoveryFamilies.spacetimeArk).catch(error => ({ status:'ERROR', error:error.message })) : Promise.resolve({status:'NOT_PRESENT'})
+      receipt.recoveryFamilies?.spacetimeArk ? this.k.spacetime.recover(receipt.recoveryFamilies.spacetimeArk).catch(error => ({ status:'ERROR', error:error.message })) : Promise.resolve({status:'NOT_PRESENT'}),
+      receipt.recoveryFamilies?.semanticFossil?.id ? this.k.fossils.verify(receipt.recoveryFamilies.semanticFossil.id).catch(error=>({valid:false,error:error.message})) : Promise.resolve({valid:true,status:'NOT_PRESENT'})
     ]);
     if (quaternary?.buffer) delete quaternary.buffer;
-    const shadowChallenge = options.live === true && shadowRecord.valid
-      ? await this.k.shadowLaws.challenge(null, receipt.corroborationFamilies.shadowLaws.id).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message }))
-      : null;
+    const shadowChallenge = options.live === true && shadowRecord.valid ? await this.k.shadowLaws.challenge(null, receipt.corroborationFamilies.shadowLaws.id).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message })) : null;
     const forwardRecord = forwardChain.results?.find(x => x.sequence === receipt.forwardWitness?.sequence) || null;
     const forwardValid = Boolean(forwardChain.valid && forwardRecord?.valid && forwardRecord.subjectHash === receipt.coreHash && receipt.forwardWitness.subjectHash === receipt.coreHash && forwardRecord.attestationHash === receipt.forwardWitness.attestationHash);
     const diaspora = receipt.physicalDiaspora?.id ? await this.k.diaspora.verifyPlacement(receipt.physicalDiaspora.id).catch(error => ({ valid: false, error: error.message })) : { valid: true, status: 'NOT_SCATTERED' };
     const polyhash = await this.k.polyhash.verify({ ...copy, archiveHash: receipt.archiveHash }, receipt.polyhash).catch(error => ({ valid: false, error: error.message }));
-    const spacetimeOkay = spacetime.status === 'NOT_PRESENT' || spacetime.status === 'RECOVERED' || spacetime.status === 'PARTIAL';
-    const independent = {
-      federation: federation.valid === true,
-      rosetta: rosetta.valid === true,
-      civilizationSeed: seed.valid === true,
-      quaternary: quaternary.status === 'RECOVERED',
-      spacetime: spacetimeOkay,
-      shadowLawRecord: shadowRecord.valid === true,
-      shadowLawLive: shadowChallenge ? shadowChallenge.status === 'SATISFIED' : null,
-      forwardWitness: forwardValid,
-      diaspora: diaspora.valid === true || diaspora.status === 'NOT_SCATTERED',
-      polyhash: polyhash.valid === true
-    };
-    const booleanChannels = Object.values(independent).filter(x => typeof x === 'boolean');
-    const healthy = booleanChannels.filter(Boolean).length;
+    const spacetimeOkay = ['NOT_PRESENT','RECOVERED','PARTIAL'].includes(spacetime.status);
+    const independent = { federation: federation.valid === true, rosetta: rosetta.valid === true, civilizationSeed: seed.valid === true, quaternary: quaternary.status === 'RECOVERED', spacetime: spacetimeOkay, semanticFossil:fossil.valid===true, shadowLawRecord: shadowRecord.valid === true, shadowLawLive: shadowChallenge ? shadowChallenge.status === 'SATISFIED' : null, forwardWitness: forwardValid, diaspora: diaspora.valid === true || diaspora.status === 'NOT_SCATTERED', polyhash: polyhash.valid === true };
+    const booleanChannels = Object.values(independent).filter(x => typeof x === 'boolean'); const healthy = booleanChannels.filter(Boolean).length;
     return {
-      format: 'JSONDB-LAST-SAVIOR-VERIFY-4', id: receipt.id,
-      valid: staticValid && coreValid && independent.federation && independent.rosetta && independent.civilizationSeed && independent.quaternary && independent.spacetime && independent.shadowLawRecord && independent.forwardWitness && independent.polyhash && (independent.shadowLawLive !== false),
-      staticValid, coreValid, expectedCoreHash: receipt.coreHash, computedCoreHash,
-      expectedArchiveHash: receipt.archiveHash, computedArchiveHash: computed,
-      independentEvidence: independent,
-      healthyChannels: healthy, totalBooleanChannels: booleanChannels.length,
-      federation, rosetta, civilizationSeed: seed, quaternary, spacetime, shadowLawRecord: shadowRecord, shadowChallenge,
-      forwardWitness: { valid: forwardValid, chainValid: forwardChain.valid, record: forwardRecord },
-      diaspora, polyhash,
+      format: 'JSONDB-LAST-SAVIOR-VERIFY-5', id: receipt.id,
+      valid: staticValid && coreValid && independent.federation && independent.rosetta && independent.civilizationSeed && independent.quaternary && independent.spacetime && independent.semanticFossil && independent.shadowLawRecord && independent.forwardWitness && independent.polyhash && (independent.shadowLawLive !== false),
+      staticValid, coreValid, expectedCoreHash: receipt.coreHash, computedCoreHash, expectedArchiveHash: receipt.archiveHash, computedArchiveHash: computed,
+      independentEvidence: independent, healthyChannels: healthy, totalBooleanChannels: booleanChannels.length,
+      federation, rosetta, civilizationSeed: seed, quaternary, spacetime, semanticFossil:fossil, shadowLawRecord: shadowRecord, shadowChallenge,
+      forwardWitness: { valid: forwardValid, chainValid: forwardChain.valid, record: forwardRecord }, diaspora, polyhash,
       doctrine: 'A green result means independent artifacts remain internally consistent. It is not automatic authorization to replace canonical state.'
     };
   }
