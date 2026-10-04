@@ -153,15 +153,15 @@ class RecoveryPlanMutationLab {
     const readOnly = options.readOnly === true;
     const [policy, crypto, forward] = await Promise.all([
       this.k.policyCheckpoint.verify(record.policyCheckpoint?.id || null, { readOnly }).catch(error => ({ valid: false, error: error.message })),
-      this.k.cryptoCouncil.verify(record.cryptoCouncil?.id).catch(error => ({ valid: false, error: error.message })),
-      this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message }))
+      this.k.cryptoCouncil.verify(record.cryptoCouncil?.id, { readOnly }).catch(error => ({ valid: false, error: error.message })),
+      this.k.forwardWitness.verifyAll({ readOnly }).catch(error => ({ valid: false, error: error.message }))
     ]);
     const forwardRecord = forward.results?.find(x => x.sequence === record.forwardWitness?.sequence) || null;
     const forwardValid = Boolean(forward.valid && forwardRecord?.valid && forwardRecord.subjectHash === record.coreHash && forwardRecord.attestationHash === record.forwardWitness.attestationHash);
     const cryptoValid = Boolean(crypto.valid && crypto.worldRoot === record.coreHash && Number(crypto.familyQuorum || 0) >= 2);
     const noUnsafe = Number(record.summary?.unsafe || 0) === 0;
     return {
-      format: 'JSONDB-RECOVERY-PLAN-MUTATION-VERIFY-2',
+      format: 'JSONDB-RECOVERY-PLAN-MUTATION-VERIFY-3',
       id: record.id,
       valid: staticValid && coreValid && policy.valid && cryptoValid && forwardValid && noUnsafe,
       readOnly,
@@ -172,7 +172,7 @@ class RecoveryPlanMutationLab {
       forwardWitnessValid: forwardValid,
       noUnsafeMutations: noUnsafe,
       summary: record.summary,
-      doctrine: 'Mutation artifact verification may recurse through its policy checkpoint without materializing policy history.'
+      doctrine: 'Mutation artifact verification may recurse through policy and cryptographic evidence without creating trust material when read-only mode is requested.'
     };
   }
 }
