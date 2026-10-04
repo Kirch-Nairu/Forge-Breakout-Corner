@@ -18,15 +18,17 @@ class RosettaCapsule {
 
   spec() {
     return {
-      format: 'JSONDB-ROSETTA-SPEC-1',
-      purpose: 'Language-agnostic reconstruction notes for JSONDB survival formats. This file is documentation encoded as JSON, not executable authority.',
+      format: 'JSONDB-ROSETTA-SPEC-2',
+      purpose: 'Language-agnostic reconstruction and authority notes for JSONDB survival formats. This file is documentation encoded as JSON, not executable authority.',
       globalRules: [
         'All integer byte values are unsigned 0..255 unless stated otherwise.',
         'All SHA-256 digests are lowercase hexadecimal unless a format explicitly says base64.',
         'Never repair the only surviving copy in place. Decode into a sandbox first.',
         'If independent decoders disagree, preserve every result and stop. Do not guess a winner.',
         'Unknown format versions must be treated as unknown rather than silently coerced.',
-        'Recovery evidence may reduce uncertainty; it never grants automatic promotion authority.'
+        'Recovery evidence may reduce uncertainty; it never grants automatic promotion authority.',
+        'A mechanism that reconstructs bytes should not be its own sole corroborator.',
+        'Machine evidence may nominate a candidate; human threshold authority remains separate.'
       ],
       canonicalJson: {
         name: 'Canonical semantic JSON used by several evidence systems',
@@ -98,15 +100,82 @@ class RosettaCapsule {
           ]
         }
       },
+      spacetimeArk: {
+        format: 'JSONDB-SPACETIME-ARK-1',
+        geometry: 'Rows are historical OMEGA epochs split into spatial data columns. Each row has one XOR spatial-parity cell. Each column, including the row-parity column, has one XOR temporal-parity cell.',
+        recovery: [
+          'Mark missing or checksum-invalid cells as erasures.',
+          'If a row contains exactly one erasure, reconstruct it as XOR of every other cell in that row.',
+          'If a column contains exactly one erasure, reconstruct it as XOR of every other cell in that column.',
+          'Repeat row and column peeling until no progress remains.',
+          'Reassemble each epoch from its data columns and verify the epoch SHA-256.'
+        ],
+        limitation: 'Some cyclic multi-erasure patterns are not peelable. Recovered epoch artifacts remain sandbox evidence.'
+      },
       timeWeave: {
         format: 'JSONDB-TIME-WEAVE-NODE-1',
         rule: 'Node at position p anchors prior positions p-1, p-2, p-4, p-8, ... while distance <= p.',
         purpose: 'Long-range continuity proof and tamper fan-out. It is not state recovery by itself.'
       },
+      semanticDeltaFossils: {
+        format: 'JSONDB-SEMANTIC-DELTA-FOSSIL-2',
+        purpose: 'Bidirectional row-aware semantic transitions between two content-addressed Memory Palace worlds.',
+        changes: [
+          'root: complete before/after catalog or meta value',
+          'table: complete before/after table for table creation or deletion',
+          'table-meta: before/after table metadata',
+          'row: before/after row keyed by stable id'
+        ],
+        forward: 'Apply each change.after to the ancestor endpoint.',
+        inverse: 'Apply each change.before to the descendant endpoint.',
+        verification: 'Forward reconstruction must equal the descendant world and inverse reconstruction must equal the ancestor world.'
+      },
       semanticHologram: {
         format: 'JSONDB-SEMANTIC-HOLOGRAM-1',
         warning: 'Lossy corroboration only; never sufficient to reconstruct full rows.',
         components: ['row counts','field/type profiles','ID-set root','row-hash XOR','seeded bucket sketches','exact semantic root where available']
+      },
+      shadowLaws: {
+        format: 'JSONDB-SHADOW-LAWS-1',
+        prime: '2^61-1',
+        rule: 'For each law and row, derive a coefficient with HMAC-SHA256(lawSeed, collection || lawIndex || rowId), map it into the prime field, multiply by a SHA-256-derived row fingerprint, and sum modulo the prime.',
+        purpose: 'Randomized post-state semantic challenge. It corroborates a candidate and does not reconstruct it.',
+        authority: 'The law record itself is dual-family attested. Satisfying the laws alone never authorizes promotion.'
+      },
+      forwardWitness: {
+        format: 'JSONDB-FORWARD-WITNESS-1',
+        rule: 'Each epoch signs its subject hash, previous attestation hash, current public-key fingerprint, and commitment to the next public-key fingerprint using a one-epoch Ed25519 identity.',
+        ratchet: 'After signing, the precommitted next key becomes current and a new future key is generated. The old private key is omitted from active state.',
+        caveat: 'Removing old private material from JSON state is not proof of physical secure erase from the filesystem.'
+      },
+      recoveryContracts: {
+        format: 'JSONDB-RECOVERY-CONTRACTS-1',
+        purpose: 'Machine-readable architecture authority: what each subsystem reconstructs, corroborates, depends on, may auto-repair, may nominate, or may authorize.',
+        invariant: 'Every contract has mayPromoteCanonical=false. Corroborative systems should not reconstruct candidate state.',
+        analysis: 'Contract analysis detects authority-shape drift such as an automatic promoter or a corroborator that unexpectedly becomes reconstructive.'
+      },
+      recoveryGeometry: {
+        format: 'JSONDB-RECOVERY-GEOMETRY-1',
+        purpose: 'Counterfactual survivability map over named capabilities and explicit alternative recovery paths.',
+        rule: 'A disaster scenario survives when at least one complete capability path remains available after requested removals.',
+        warning: 'Coverage is a scenario/path coverage metric, not a probability of durability.'
+      },
+      recoveryNavigator: {
+        format: 'JSONDB-RECOVERY-NAVIGATOR-1',
+        purpose: 'Plan-only selection of one reconstructive source plus independent non-reconstructive corroborators under Recovery Contracts and Recovery Geometry.',
+        phases: ['preserve evidence','reconstruct sandbox','canonicalize candidate','independent corroboration','Recovery Jury','Jury Promotion Gate','human threshold ceremony','manual promotion boundary'],
+        authority: 'Navigator never executes recovery into canonical state and never performs automatic promotion.'
+      },
+      recoveryJury: {
+        format: 'JSONDB-RECOVERY-JURY-1',
+        verdicts: ['EXACT','STRONGLY_CORROBORATED','AMBIGUOUS','REJECTED'],
+        purpose: 'Attested machine adjudication of a persistent sandbox candidate against exact semantic identity, Hologram, Shadow Laws, Last Savior evidence, and Federation lineage.',
+        authority: 'May nominate an eligible candidate; cannot promote.'
+      },
+      promotionBoundary: {
+        juryGate: 'Only an EXACT or STRONGLY_CORROBORATED verified Jury case may open the promotion proposal.',
+        humanThreshold: 'Existing promotion ceremony requires threshold operator signatures.',
+        execution: 'The recovery stack intentionally has no automatic canonical-promotion action.'
       },
       evidenceDiaspora: {
         format: 'JSONDB-EVIDENCE-DIASPORA-PLACEMENT-1',
@@ -123,7 +192,9 @@ class RosettaCapsule {
         unknownVersion: 'READ_ONLY_FORENSIC',
         insufficientQuorum: 'UNRESOLVED_NOT_GUESSED',
         corruptOnlyCopy: 'PRESERVE_BEFORE_ATTEMPTING_REPAIR',
-        recoveredCandidate: 'SANDBOX_ONLY_UNTIL_OPERATOR_PROMOTION'
+        recoveredCandidate: 'SANDBOX_ONLY_UNTIL_OPERATOR_PROMOTION',
+        contractViolation: 'BLOCK_NAVIGATED_PROMOTION_PATH',
+        ambiguousHistory: 'PRESERVE_ALL_DEFENSIBLE_LINEAGES'
       }
     };
   }
@@ -133,7 +204,7 @@ class RosettaCapsule {
     const ff = Buffer.from([0xff]);
     const j = Buffer.from('J','utf8');
     return {
-      format: 'JSONDB-ROSETTA-VECTORS-1',
+      format: 'JSONDB-ROSETTA-VECTORS-2',
       vectors: [
         { name:'byte-zero', inputHex:'00', sha256:sha256Hex(zero), quaternary:'AAAA' },
         { name:'byte-ff', inputHex:'ff', sha256:sha256Hex(ff), quaternary:'TTTT' },
@@ -154,13 +225,15 @@ class RosettaCapsule {
     await atomicJson(path.join(dir,'ROSETTA-SPEC.json'), spec);
     await atomicJson(path.join(dir,'KNOWN-VECTORS.json'), examples);
     await atomicJson(path.join(dir,'BOOTSTRAP.json'), {
-      format:'JSONDB-ROSETTA-BOOTSTRAP-1', createdAt:now(),
+      format:'JSONDB-ROSETTA-BOOTSTRAP-2', createdAt:now(),
       order:[
         'Read ROSETTA-SPEC.json as ordinary UTF-8 JSON.',
         'Implement only the decoder required by the surviving artifact.',
         'Confirm the tiny known vectors before interpreting precious recovery media.',
+        'Read Recovery Contracts before deciding whether the artifact reconstructs data, only corroborates it, or carries authority evidence.',
         'Decode into new files; never overwrite sole surviving artifacts.',
-        'Cross-check semantic or cryptographic evidence from an independent subsystem.',
+        'Cross-check reconstructed state with a non-reconstructive semantic or cryptographic subsystem.',
+        'Send persistent candidates through Recovery Jury before any human promotion ceremony.',
         'If evidence contradicts, preserve ambiguity and stop.'
       ],
       minimalAssumptions:['ability to read UTF-8','ability to parse JSON','ability to perform byte XOR','ability to compute SHA-256 for strong verification']
@@ -169,7 +242,7 @@ class RosettaCapsule {
     const entries=[];
     for(const file of files)entries.push({path:path.relative(dir,file).split(path.sep).join('/'),sha256:await hashFile(file)});
     entries.sort((a,b)=>a.path.localeCompare(b.path));
-    const manifest={format:'JSONDB-ROSETTA-CAPSULE-1',id,label,createdAt:now(),entries,merkleRoot:merkleRoot(entries.map(x=>x.sha256))};
+    const manifest={format:'JSONDB-ROSETTA-CAPSULE-2',id,label,createdAt:now(),entries,merkleRoot:merkleRoot(entries.map(x=>x.sha256))};
     if(this.polyhash)manifest.polyhash=await this.polyhash.envelope(manifest,{purpose:'rosetta-capsule'});
     await atomicJson(path.join(dir,'MANIFEST.json'),manifest);
     await atomicJson(path.join(this.root,'latest.json'),{id,directory:dir,merkleRoot:manifest.merkleRoot,createdAt:manifest.createdAt});
