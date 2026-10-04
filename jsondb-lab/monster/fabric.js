@@ -6,11 +6,12 @@ const { now, readJson, atomicJson, ensureDir } = require('./jsonfs');
 class SurvivalFabric {
   constructor({
     engine, savior, guardian, truth, council, immune, orthogonal, trinity,
-    genome, fractal, metamorphic, chronicle, braid, oracle
+    genome, fractal, metamorphic, chronicle, braid, oracle,
+    trustBudget = null, challenge = null
   }) {
     Object.assign(this, {
       engine, savior, guardian, truth, council, immune, orthogonal, trinity,
-      genome, fractal, metamorphic, chronicle, braid, oracle
+      genome, fractal, metamorphic, chronicle, braid, oracle, trustBudget, challenge
     });
     this.root = path.join(savior.root, 'survival-fabric');
     this.receipts = path.join(this.root, 'receipts');
@@ -21,7 +22,7 @@ class SurvivalFabric {
     await ensureDir(this.receipts);
     const inits = [
       this.savior, this.guardian, this.council, this.immune, this.orthogonal,
-      this.trinity, this.genome, this.fractal, this.chronicle, this.braid
+      this.trinity, this.genome, this.fractal, this.chronicle, this.braid, this.challenge
     ].filter(x => x && typeof x.init === 'function');
     for (const system of inits) await system.init();
     return this.status({ deep: false });
@@ -39,13 +40,14 @@ class SurvivalFabric {
   async status(options = {}) {
     const deep = options.deep === true;
     const current = await this.savior.status();
-    const [truth, chronicle, braid, witness, immune, genome] = await Promise.all([
+    const [truth, chronicle, braid, witness, immune, genome, challengeCoverage] = await Promise.all([
       this.truth.worldVerdict().catch(error => ({ status: 'ERROR', confidence: 0, error: error.message })),
       this.chronicle.verify().catch(error => ({ valid: false, error: error.message })),
       this.braid.verify().catch(error => ({ valid: false, error: error.message })),
       this.council.verifyRound().catch(error => ({ valid: false, error: error.message })),
       this.immune.scan().catch(error => ({ status: 'ERROR', health: 0, error: error.message })),
-      this.genome.verify().catch(error => ({ valid: false, error: error.message }))
+      this.genome.verify().catch(error => ({ valid: false, error: error.message })),
+      this.challenge ? this.challenge.coverage().catch(error => ({ rounds: 0, error: error.message })) : Promise.resolve(null)
     ]);
     let trinity = { status: 'UNVERIFIED' };
     const latestTrinity = await readJson(path.join(this.trinity.root, 'latest.json'), null);
@@ -53,8 +55,9 @@ class SurvivalFabric {
     else if (deep) trinity = await this.trinity.verify().catch(error => ({ status: 'ERROR', error: error.message }));
     let oracle = null;
     if (this.oracle) oracle = await this.oracle.assess({ verifyArchives: deep }).catch(error => ({ verdict: 'PANIC', confidence: 0, error: error.message }));
+    const trustBudget = this.trustBudget && oracle ? this.trustBudget.evaluate(oracle) : null;
     return {
-      format: 'JSONDB-SURVIVAL-FABRIC-STATUS-1', at: now(), mode: current.mode,
+      format: 'JSONDB-SURVIVAL-FABRIC-STATUS-2', at: now(), mode: current.mode,
       summary: {
         truth: truth.status, truthConfidence: truth.confidence,
         chronicle: chronicle.valid === true ? 'VALID' : 'INVALID',
@@ -64,9 +67,12 @@ class SurvivalFabric {
         genome: genome.valid === true ? 'VALID' : genome.reason === 'genome missing' ? 'ABSENT' : 'INVALID',
         trinity: trinity.status,
         oracle: oracle?.verdict || null,
-        oracleConfidence: oracle?.confidence ?? null
+        oracleConfidence: oracle?.confidence ?? null,
+        independenceAdjustedTrust: trustBudget?.independenceAdjustedConfidence ?? null,
+        trustDiversity: trustBudget?.verdict || null,
+        challengeRounds: challengeCoverage?.rounds ?? null
       },
-      truth, chronicle, braid, witness, immune, genome, trinity, oracle
+      truth, chronicle, braid, witness, immune, genome, trinity, oracle, trustBudget, challengeCoverage
     };
   }
 
@@ -90,14 +96,22 @@ class SurvivalFabric {
     if (options.genome === true || options.level === 'ULTIMATE') genome = await this.genome.create(label);
 
     const braid = await this.braid.weave(label, { verifyChronicle: true });
-    if (braid.contradictions?.length) {
-      await this.savior.setMode('read-only', `Cross-history contradiction during seal ${label}`);
+    if (braid.contradictions?.length) await this.savior.setMode('read-only', `Cross-history contradiction during seal ${label}`);
+
+    let challenge = null;
+    if (this.challenge && (options.challenge === true || options.level === 'ULTIMATE')) {
+      challenge = await this.challenge.challenge({ perFile: options.challengePerFile || 4, freezeOnFailure: true });
     }
 
     const immune = await this.immune.scan().catch(error => ({ status: 'ERROR', health: 0, error: error.message }));
     const oracle = this.oracle ? await this.oracle.assess({ verifyArchives: options.verifyArchives === true }) : null;
+    const trustBudget = this.trustBudget && oracle ? this.trustBudget.evaluate(oracle) : null;
+    if (trustBudget && ['UNTRUSTED','INSUFFICIENT_DIVERSITY'].includes(trustBudget.verdict) && options.enforceTrustBudget === true) {
+      await this.savior.setMode('read-only', `Failure-domain trust budget ${trustBudget.verdict} at ${trustBudget.independenceAdjustedConfidence}%`);
+    }
+
     const result = {
-      format: 'JSONDB-SURVIVAL-FABRIC-SEAL-1', at: now(), label,
+      format: 'JSONDB-SURVIVAL-FABRIC-SEAL-2', at: now(), label,
       level: options.level || 'NORMAL',
       mirror: { files: mirror.files?.length || 0, capture: mirror.capture || mirror.id || null },
       temporal: { epoch: temporal.epoch, worldRoot: temporal.worldRoot, roundHash: temporal.roundHash },
@@ -105,7 +119,8 @@ class SurvivalFabric {
       chronicle: { valid: chronicle.valid, replayRoot: chronicle.replayRoot, liveRoot: chronicle.liveRoot, appliedCommits: chronicle.appliedCommits },
       braid: { sequence: braid.sequence, epochHash: braid.epochHash, contradictions: braid.contradictions },
       immune: { status: immune.status, health: immune.health },
-      trinity, genome, oracle
+      challenge: challenge ? { id: challenge.id, healthy: challenge.healthy, disagreements: challenge.disagreements, unreadable: challenge.unreadable } : null,
+      trinity, genome, oracle, trustBudget
     };
     await this.archiveReceipt('seal', result);
     return result;
@@ -145,6 +160,14 @@ class SurvivalFabric {
     else blockers.push({ channel: 'cross-history-braid', reason: 'No majority braid head across survival roots.' });
 
     if (status.genome.valid) recommendations.push({ priority: 5, action: 'PRESERVE_RECOVERY_GENOME', reason: 'Recovery source material verifies and can rebuild rescue tools.' });
+    if (status.trustBudget?.verdict === 'DIVERSE_TRUST') recommendations.push({ priority: 2, action: 'PREFER_CROSS_DOMAIN_AGREEMENT', reason: 'Trust remains high after correlated evidence is discounted by failure domain.' });
+    else if (status.trustBudget) blockers.push({ channel: 'failure-domain-trust-budget', reason: `${status.trustBudget.verdict} at ${status.trustBudget.independenceAdjustedConfidence}%` });
+
+    if (this.challenge && options.challenge === true) {
+      const scrub = await this.challenge.challenge({ perFile: options.challengePerFile || 8, freezeOnFailure: false });
+      if (scrub.healthy) recommendations.push({ priority: 3, action: 'USE_RECENT_CHALLENGE_SCRUB_AS_LATENT_ROT_EVIDENCE', reason: `${scrub.totalChallenges} deterministic byte challenges agreed.` });
+      else blockers.push({ channel: 'challenge-scrubber', reason: `${scrub.disagreements} disagreements, ${scrub.unreadable} unreadable responses` });
+    }
 
     const fractal = [];
     if (options.fractalTables === true) {
@@ -156,7 +179,7 @@ class SurvivalFabric {
 
     recommendations.sort((a,b)=>a.priority-b.priority);
     const dossier = {
-      format: 'JSONDB-SURVIVAL-RECOVERY-CASE-1', at: now(),
+      format: 'JSONDB-SURVIVAL-RECOVERY-CASE-2', at: now(),
       currentMode: (await this.savior.status()).mode,
       doctrine: 'Recovery evidence may reconstruct into sandboxes automatically. Promotion to canonical state is never automatic.',
       recommendations, blockers, status, braidQuorum, fractal
@@ -172,11 +195,12 @@ class SurvivalFabric {
     outputs.mirrors = await this.savior.captureMirrors().catch(error => ({ error: error.message }));
     outputs.temporal = await this.guardian.witnessRound('emergency-seal').catch(error => ({ error: error.message }));
     if (outputs.temporal?.worldRoot) outputs.signed = await this.council.round(outputs.temporal.worldRoot, { reason, emergency: true }).catch(error => ({ error: error.message }));
+    outputs.challenge = this.challenge ? await this.challenge.challenge({ perFile: 16, freezeOnFailure: false }).catch(error => ({ error: error.message })) : null;
     outputs.trinity = await this.trinity.archive('emergency-seal').catch(error => ({ error: error.message }));
     outputs.genome = await this.genome.create('emergency-seal').catch(error => ({ error: error.message }));
     outputs.braid = await this.braid.weave('emergency-seal').catch(error => ({ error: error.message }));
     await this.savior.setMode('panic', reason);
-    const result = { format: 'JSONDB-EMERGENCY-SEAL-1', at: now(), reason, previousMode: before.mode, currentMode: 'panic', outputs };
+    const result = { format: 'JSONDB-EMERGENCY-SEAL-2', at: now(), reason, previousMode: before.mode, currentMode: 'panic', outputs };
     await this.archiveReceipt('emergency-seal', result);
     return result;
   }
