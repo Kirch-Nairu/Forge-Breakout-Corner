@@ -101,17 +101,44 @@ class EvidenceDiaspora {
     }
     const polyhashValid = !record.polyhash || Boolean(polyhash?.valid);
 
+    const copyChecks = [];
+    const declaredCopies = Array.isArray(record.copied) ? record.copied : null;
+    if (declaredCopies) {
+      for (const item of declaredCopies) {
+        const name = String(item?.name || '');
+        const target = path.join(directory, name);
+        if (!name || safe(name) !== name || item?.error) {
+          copyChecks.push({ name, valid: false, status: item?.error ? 'SOURCE_COPY_ERROR' : 'INVALID_TARGET_NAME', error: item?.error || null });
+          continue;
+        }
+        try {
+          const stat = await fsp.stat(target);
+          const actualType = stat.isDirectory() ? 'directory' : stat.isFile() ? 'file' : 'other';
+          copyChecks.push({ name, valid: actualType === item.type, status: actualType === item.type ? 'PRESENT' : 'TYPE_MISMATCH', expectedType: item.type || null, actualType });
+        } catch (error) {
+          copyChecks.push({ name, valid: false, status: 'TARGET_ABSENT', expectedType: item.type || null, error: error.message });
+        }
+      }
+    }
+    const names = declaredCopies ? declaredCopies.map(item => String(item?.name || '')) : [];
+    const uniqueTargetNames = Boolean(declaredCopies && new Set(names).size === names.length);
+    const copyCompletenessValid = Boolean(declaredCopies && uniqueTargetNames && copyChecks.every(item => item.valid));
+
     return {
-      format: 'JSONDB-EVIDENCE-DIASPORA-BUNDLE-VERIFY-1',
+      format: 'JSONDB-EVIDENCE-DIASPORA-BUNDLE-VERIFY-2',
       id: record.id,
       requestedId: latest.id,
       directory,
       valid: identityValid && staticValid && manifestValid && polyhashValid,
+      complete: copyCompletenessValid,
       readOnly,
       identityValid,
       staticValid,
       manifestValid,
       polyhashValid,
+      copyCompletenessValid,
+      uniqueTargetNames,
+      copyChecks,
       expectedBundleHash: record.bundleHash,
       computedBundleHash,
       recordedMerkleRoot: record.manifest?.merkleRoot || null,
@@ -120,7 +147,7 @@ class EvidenceDiaspora {
       computedFiles: actualManifest?.files ?? null,
       manifestError,
       polyhash,
-      doctrine: 'Bundle verification recomputes the sealed pre-manifest file set and never repairs, rewrites, hydrates, or normalizes evidence when read-only mode is requested.'
+      doctrine: 'Bundle validity proves the sealed package has not changed. Completeness separately proves every requested source copy succeeded and still exists at one unique expected target type. A structurally valid partial bundle remains honest evidence, but higher-level archives may require completeness.'
     };
   }
 
