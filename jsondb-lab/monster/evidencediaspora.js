@@ -71,22 +71,18 @@ class EvidenceDiaspora {
     const rows = media.map(m => ({ medium: m, domain: this.domainKey(m) }));
     const chosen = [];
     const usedDevices = new Set(), usedLocations = new Set();
-
-    // Pass 1: maximize simultaneous device + location novelty.
     for (const row of rows) {
       if (!usedDevices.has(row.domain.device) && !usedLocations.has(row.domain.location)) {
         chosen.push({ ...row, tier: 'NEW_DEVICE_AND_LOCATION' });
         usedDevices.add(row.domain.device); usedLocations.add(row.domain.location);
       }
     }
-    // Pass 2: at least new device.
     for (const row of rows) {
       if (chosen.some(x => x.medium.name === row.medium.name)) continue;
       if (!usedDevices.has(row.domain.device)) {
         chosen.push({ ...row, tier: 'NEW_DEVICE' }); usedDevices.add(row.domain.device); usedLocations.add(row.domain.location);
       }
     }
-    // Pass 3: correlated overflow.
     for (const row of rows) if (!chosen.some(x => x.medium.name === row.medium.name)) chosen.push({ ...row, tier: 'CORRELATED_OVERFLOW' });
     return chosen;
   }
@@ -134,10 +130,16 @@ class EvidenceDiaspora {
     return result;
   }
 
-  async verifyPlacement(id = null) {
-    await this.init();
+  async verifyPlacement(id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const record = id ? await readJson(path.join(this.receipts, `${id}.json`), null) : await readJson(path.join(this.root, 'latest-placement.json'), null);
-    if (!record) return { valid: false, status: 'ABSENT' };
+    if (!record) return { valid: false, status: 'ABSENT', readOnly };
+    const receiptCopy = { ...record }; delete receiptCopy.receiptHash; delete receiptCopy.polyhash;
+    const computedReceiptHash = digest(receiptCopy);
+    const staticValid = computedReceiptHash === record.receiptHash;
+    let polyhash = null;
+    if (this.polyhash && record.polyhash) polyhash = await this.polyhash.verify({ ...receiptCopy, receiptHash: record.receiptHash }, record.polyhash, { readOnly });
     const checks = [];
     for (const p of record.placements || []) {
       try {
@@ -145,8 +147,21 @@ class EvidenceDiaspora {
         checks.push({ media: p.media, valid: m.merkleRoot === record.sourceMerkleRoot, actualMerkleRoot: m.merkleRoot, expected: record.sourceMerkleRoot });
       } catch (error) { checks.push({ media: p.media, valid: false, error: error.message }); }
     }
-    const valid = checks.filter(x=>x.valid).length;
-    return { valid: valid > 0 && checks.every(x=>x.valid), validCopies: valid, totalCopies: checks.length, checks };
+    const validCopies = checks.filter(x=>x.valid).length;
+    const copiesValid = validCopies > 0 && checks.every(x=>x.valid);
+    return {
+      format: 'JSONDB-EVIDENCE-DIASPORA-PLACEMENT-VERIFY-2',
+      valid: staticValid && (!polyhash || polyhash.valid) && copiesValid,
+      readOnly,
+      staticValid,
+      expectedReceiptHash: record.receiptHash,
+      computedReceiptHash,
+      polyhash,
+      copiesValid,
+      validCopies,
+      totalCopies: checks.length,
+      checks
+    };
   }
 }
 
