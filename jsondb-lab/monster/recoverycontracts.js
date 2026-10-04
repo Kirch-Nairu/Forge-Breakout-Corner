@@ -91,7 +91,7 @@ class RecoveryContractRegistry{
  async version(registryHash,options={}){
   if(!registryHash)return null;
   const found=await readJson(path.join(this.versions,`${registryHash}.json`),null);
-  if(found)return found;
+  if(found&&found.registryHash===registryHash&&registryContentHash(found)===registryHash)return found;
   const archived=await this.readArchivedVersion(registryHash);
   if(!archived)return null;
   if(options.hydrate!==false)await this.persistVersion(archived);
