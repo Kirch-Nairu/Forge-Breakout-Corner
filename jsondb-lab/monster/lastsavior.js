@@ -15,7 +15,7 @@ class LastSaviorArchive {
 
   async init() { await ensureDir(this.receipts); }
 
-  async evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws }) {
+  async evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness }) {
     const rows = [];
     const add = (name, p) => { if (p) rows.push({ name, path: p }); };
     add('FEDERATION-RECEIPT.json', path.join(this.k.federation.receipts, `${federation.id}.json`));
@@ -25,6 +25,7 @@ class LastSaviorArchive {
     if (federation.semanticHologram?.id) add('SEMANTIC-HOLOGRAM.json', path.join(this.k.hologram.records, `${federation.semanticHologram.id}.json`));
     if (federation.historyCourt?.id) add('HISTORY-COURT.json', path.join(this.k.historyCourt.cases, `${federation.historyCourt.id}.json`));
     if (shadowLaws?.id) add('SHADOW-LAWS.json', path.join(this.k.shadowLaws.records, `${shadowLaws.id}.json`));
+    if (forwardWitness?.statement?.sequence) add('FORWARD-WITNESS.json', path.join(this.k.forwardWitness.records, `${String(forwardWitness.statement.sequence).padStart(10,'0')}.json`));
     add('ROSETTA-CAPSULE', rosetta.directory);
     add('QUATERNARY-COLD-STORAGE', path.join(this.k.quaternary.generations, quaternary.generation));
     add('CIVILIZATION-SEED', seed.directory);
@@ -59,26 +60,9 @@ class LastSaviorArchive {
     });
     const seed = await this.k.civilizationSeed.create(`${label}:civilization-seed`);
 
-    const bundle = await this.k.diaspora.createBundle(`${label}:evidence`, await this.evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws }), {
-      federationId: federation.id,
-      omegaEpochId: federation.omegaEpoch.id,
-      shadowLawId: shadowLaws.id,
-      quaternaryGeneration: quaternary.generation,
-      rosettaId: rosetta.id,
-      civilizationSeedId: seed.id
-    });
-
-    let diaspora = null;
-    if (options.scatter !== false) {
-      try {
-        const assessment = await this.k.constellation.assess();
-        if ((assessment.registry?.media || []).length) diaspora = await this.k.diaspora.scatter(bundle.id, { copies: options.copies });
-        else diaspora = { status: 'DEFERRED', reason: 'No registered physical media. Evidence bundle exists locally.' };
-      } catch (error) { diaspora = { status: 'DEFERRED', reason: error.message }; }
-    }
-
-    const receipt = {
-      format: 'JSONDB-LAST-SAVIOR-ARCHIVE-2',
+    // Build the archive core first. The forward witness signs this stable core hash.
+    const archiveCore = {
+      format: 'JSONDB-LAST-SAVIOR-ARCHIVE-3',
       id: `${Date.now()}-${crypto.randomBytes(6).toString('hex')}`,
       label, createdAt: now(),
       world: {
@@ -105,16 +89,54 @@ class LastSaviorArchive {
         crossHistoryBraid: (await readJson(path.join(this.k.braid.root, 'latest.json'), null))?.epochHash || null,
         historyCourt: federation.historyCourt
       },
-      evidenceBundle: { id: bundle.id, merkleRoot: bundle.manifest.merkleRoot, bundleHash: bundle.bundleHash },
-      physicalDiaspora: diaspora,
       doctrine: [
         'Recovery data and validation evidence are intentionally separated.',
         'No single decoder family is sufficient promotion authority.',
         'Holograms and randomized Shadow Laws corroborate reconstructions without serving as their recovery source.',
+        'Forward Witness Ratchet gives historical attestations an evolving signing identity; old private keys are removed from active state but filesystem secure erasure is not guaranteed.',
         'Recovered data is restored into a sandbox first.',
         'Divergent defensible histories are preserved, not silently collapsed.',
         'Automation may freeze authority; only an explicit promotion ceremony may raise it.'
       ]
+    };
+    const coreHash = digest(archiveCore);
+    const forwardWitness = await this.k.forwardWitness.attest(coreHash, {
+      purpose: 'last-savior-core', archiveId: archiveCore.id,
+      federationId: federation.id, omegaEpochId: federation.omegaEpoch.id
+    });
+
+    const bundle = await this.k.diaspora.createBundle(`${label}:evidence`, await this.evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness }), {
+      federationId: federation.id,
+      omegaEpochId: federation.omegaEpoch.id,
+      shadowLawId: shadowLaws.id,
+      forwardWitnessSequence: forwardWitness.statement.sequence,
+      forwardWitnessHash: forwardWitness.attestationHash,
+      quaternaryGeneration: quaternary.generation,
+      rosettaId: rosetta.id,
+      civilizationSeedId: seed.id
+    });
+
+    let diaspora = null;
+    if (options.scatter !== false) {
+      try {
+        const assessment = await this.k.constellation.assess();
+        if ((assessment.registry?.media || []).length) diaspora = await this.k.diaspora.scatter(bundle.id, { copies: options.copies });
+        else diaspora = { status: 'DEFERRED', reason: 'No registered physical media. Evidence bundle exists locally.' };
+      } catch (error) { diaspora = { status: 'DEFERRED', reason: error.message }; }
+    }
+
+    const receipt = {
+      ...archiveCore,
+      coreHash,
+      forwardWitness: {
+        sequence: forwardWitness.statement.sequence,
+        subjectHash: forwardWitness.statement.subjectHash,
+        signingKeyFingerprint: forwardWitness.statement.signingKeyFingerprint,
+        nextKeyFingerprint: forwardWitness.statement.nextKeyFingerprint,
+        attestationHash: forwardWitness.attestationHash
+      },
+      evidenceBundle: { id: bundle.id, merkleRoot: bundle.manifest.merkleRoot, bundleHash: bundle.bundleHash },
+      physicalDiaspora: diaspora
     };
     receipt.archiveHash = digest(receipt);
     receipt.polyhash = await this.k.polyhash.envelope(receipt, { purpose: 'last-savior-archive' });
@@ -130,17 +152,26 @@ class LastSaviorArchive {
     const copy = { ...receipt }; delete copy.archiveHash; delete copy.polyhash;
     const computed = digest(copy);
     const staticValid = computed === receipt.archiveHash;
-    const [federation, rosetta, seed, quaternary, shadowRecord] = await Promise.all([
+
+    const coreCopy = { ...receipt };
+    delete coreCopy.coreHash; delete coreCopy.forwardWitness; delete coreCopy.evidenceBundle; delete coreCopy.physicalDiaspora; delete coreCopy.archiveHash; delete coreCopy.polyhash;
+    const computedCoreHash = digest(coreCopy);
+    const coreValid = computedCoreHash === receipt.coreHash;
+
+    const [federation, rosetta, seed, quaternary, shadowRecord, forwardChain] = await Promise.all([
       this.k.federation.verify(receipt.world.federationId, { live: options.live === true }).catch(error => ({ valid: false, error: error.message })),
       this.k.rosetta.verify(receipt.recoveryFamilies.rosettaCapsule).catch(error => ({ valid: false, error: error.message })),
       this.k.civilizationSeed.verify(receipt.recoveryFamilies.civilizationSeed).catch(error => ({ valid: false, error: error.message })),
       this.k.quaternary.recover(receipt.recoveryFamilies.quaternaryGeneration).catch(error => ({ status: 'ERROR', error: error.message })),
-      this.k.shadowLaws.verifyRecord(receipt.corroborationFamilies?.shadowLaws?.id || null).catch(error => ({ valid: false, error: error.message }))
+      this.k.shadowLaws.verifyRecord(receipt.corroborationFamilies?.shadowLaws?.id || null).catch(error => ({ valid: false, error: error.message })),
+      this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message }))
     ]);
     if (quaternary?.buffer) delete quaternary.buffer;
     const shadowChallenge = options.live === true && shadowRecord.valid
       ? await this.k.shadowLaws.challenge(null, receipt.corroborationFamilies.shadowLaws.id).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message }))
       : null;
+    const forwardRecord = forwardChain.results?.find(x => x.sequence === receipt.forwardWitness?.sequence) || null;
+    const forwardValid = Boolean(forwardChain.valid && forwardRecord?.valid && forwardRecord.subjectHash === receipt.coreHash && receipt.forwardWitness.subjectHash === receipt.coreHash && forwardRecord.attestationHash === receipt.forwardWitness.attestationHash);
     const diaspora = receipt.physicalDiaspora?.id ? await this.k.diaspora.verifyPlacement(receipt.physicalDiaspora.id).catch(error => ({ valid: false, error: error.message })) : { valid: true, status: 'NOT_SCATTERED' };
     const polyhash = await this.k.polyhash.verify({ ...copy, archiveHash: receipt.archiveHash }, receipt.polyhash).catch(error => ({ valid: false, error: error.message }));
     const independent = {
@@ -150,18 +181,22 @@ class LastSaviorArchive {
       quaternary: quaternary.status === 'RECOVERED',
       shadowLawRecord: shadowRecord.valid === true,
       shadowLawLive: shadowChallenge ? shadowChallenge.status === 'SATISFIED' : null,
+      forwardWitness: forwardValid,
       diaspora: diaspora.valid === true || diaspora.status === 'NOT_SCATTERED',
       polyhash: polyhash.valid === true
     };
     const booleanChannels = Object.values(independent).filter(x => typeof x === 'boolean');
     const healthy = booleanChannels.filter(Boolean).length;
     return {
-      format: 'JSONDB-LAST-SAVIOR-VERIFY-2', id: receipt.id,
-      valid: staticValid && independent.federation && independent.rosetta && independent.civilizationSeed && independent.quaternary && independent.shadowLawRecord && independent.polyhash && (independent.shadowLawLive !== false),
-      staticValid, expectedArchiveHash: receipt.archiveHash, computedArchiveHash: computed,
+      format: 'JSONDB-LAST-SAVIOR-VERIFY-3', id: receipt.id,
+      valid: staticValid && coreValid && independent.federation && independent.rosetta && independent.civilizationSeed && independent.quaternary && independent.shadowLawRecord && independent.forwardWitness && independent.polyhash && (independent.shadowLawLive !== false),
+      staticValid, coreValid, expectedCoreHash: receipt.coreHash, computedCoreHash,
+      expectedArchiveHash: receipt.archiveHash, computedArchiveHash: computed,
       independentEvidence: independent,
       healthyChannels: healthy, totalBooleanChannels: booleanChannels.length,
-      federation, rosetta, civilizationSeed: seed, quaternary, shadowLawRecord: shadowRecord, shadowChallenge, diaspora, polyhash,
+      federation, rosetta, civilizationSeed: seed, quaternary, shadowLawRecord: shadowRecord, shadowChallenge,
+      forwardWitness: { valid: forwardValid, chainValid: forwardChain.valid, record: forwardRecord },
+      diaspora, polyhash,
       doctrine: 'A green result means independent artifacts remain internally consistent. It is not automatic authorization to replace canonical state.'
     };
   }
