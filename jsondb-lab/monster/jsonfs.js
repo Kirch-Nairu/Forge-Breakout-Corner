@@ -13,6 +13,37 @@ async function exists(file) { try { await fsp.access(file); return true; } catch
 async function readText(file, fallback = '') { try { return await fsp.readFile(file, 'utf8'); } catch (e) { if (e.code === 'ENOENT') return fallback; throw e; } }
 async function readJson(file, fallback = null) { const text = await readText(file, ''); if (!text) return fallback; return JSON.parse(text); }
 
+const TRANSIENT_REPLACE_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+async function replaceFileAtomic(tmp, file, options = {}) {
+  const attempts = Math.max(1, Number(options.attempts || 12));
+  const baseDelayMs = Math.max(1, Number(options.baseDelayMs || 8));
+  const rename = options.rename || fsp.rename.bind(fsp);
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      await rename(tmp, file);
+      return { attempts: attempt, retried: attempt > 1 };
+    } catch (error) {
+      lastError = error;
+      const transient = TRANSIENT_REPLACE_CODES.has(error?.code);
+      if (!transient || attempt >= attempts) throw error;
+
+      // Windows Defender, indexing, or another very short-lived reader can briefly
+      // hold a destination handle during an otherwise valid atomic replacement.
+      // Keep the destination intact and retry the rename rather than unlinking it.
+      const exponential = Math.min(180, baseDelayMs * (2 ** Math.min(attempt - 1, 5)));
+      const jitter = Math.floor(Math.random() * Math.min(17, baseDelayMs + attempt));
+      await sleep(exponential + jitter);
+    }
+  }
+
+  throw lastError || new Error('Atomic replacement failed without an error.');
+}
+
 async function fsyncDir(dir) {
   try {
     const handle = await fsp.open(dir, fs.constants.O_RDONLY);
@@ -25,15 +56,22 @@ async function fsyncDir(dir) {
 async function atomicText(file, body) {
   await ensureDir(path.dirname(file));
   const tmp = `${file}.${process.pid}.${Date.now()}.${crypto.randomBytes(6).toString('hex')}.tmp`;
-  const handle = await fsp.open(tmp, 'w');
+  let committed = false;
   try {
-    await handle.writeFile(body, 'utf8');
-    await handle.sync();
+    const handle = await fsp.open(tmp, 'w');
+    try {
+      await handle.writeFile(body, 'utf8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+
+    await replaceFileAtomic(tmp, file);
+    committed = true;
+    await fsyncDir(path.dirname(file));
   } finally {
-    await handle.close();
+    if (!committed) await fsp.unlink(tmp).catch(() => {});
   }
-  await fsp.rename(tmp, file);
-  await fsyncDir(path.dirname(file));
 }
 
 async function atomicJson(file, value) {
@@ -121,5 +159,5 @@ async function copyDir(src, dst) {
 module.exports = {
   now, uuid, clone, ensureDir, exists, readText, readJson, readJsonl,
   atomicText, atomicJson, appendJsonl, hashFile, hashValue, merkleRoot,
-  listFilesRecursive, copyDir, fsyncDir
+  listFilesRecursive, copyDir, fsyncDir, replaceFileAtomic, TRANSIENT_REPLACE_CODES
 };
