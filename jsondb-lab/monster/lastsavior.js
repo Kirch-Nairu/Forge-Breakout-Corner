@@ -15,7 +15,7 @@ class LastSaviorArchive {
 
   async init() { await ensureDir(this.receipts); }
 
-  async evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness, spacetime, fossil }) {
+  async evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness, spacetime, fossil, braid }) {
     const rows = [];
     const add = (name, p) => { if (p) rows.push({ name, path: p }); };
     add('FEDERATION-RECEIPT.json', path.join(this.k.federation.receipts, `${federation.id}.json`));
@@ -34,7 +34,7 @@ class LastSaviorArchive {
     add('QUATERNARY-COLD-STORAGE', path.join(this.k.quaternary.generations, quaternary.generation));
     add('CIVILIZATION-SEED', seed.directory);
     add('CRYPTOGRAPHIC-COUNCIL.json', path.join(this.k.cryptoCouncil.root, 'latest.json'));
-    add('CROSS-HISTORY-BRAID.json', path.join(this.k.braid.root, 'latest.json'));
+    if (braid?.epochHash) add('CROSS-HISTORY-BRAID.json', this.k.braid.head);
     return rows;
   }
 
@@ -63,6 +63,7 @@ class LastSaviorArchive {
     const quaternary = await this.k.quaternary.archiveBuffer(`${label}:quaternary`, Buffer.from(JSON.stringify(world)), { oligoBytes: Number(options.oligoBytes || 512), groupSize: Number(options.oligoGroupSize || 8) });
     const seed = await this.k.civilizationSeed.create(`${label}:civilization-seed`);
     const fossil = await this.k.fossils.capture(`${label}:fossil`);
+    const braid = await readJson(this.k.braid.head, null);
 
     let spacetime = null;
     let spacetimePlacement = null;
@@ -99,7 +100,7 @@ class LastSaviorArchive {
         shadowLaws: { id: shadowLaws.id, recordHash: shadowLaws.recordHash, attestationId: shadowLaws.attestation?.id || null },
         timeWeave: federation.timeWeave,
         cryptographicCouncil: (await readJson(path.join(this.k.cryptoCouncil.root, 'latest.json'), null))?.id || null,
-        crossHistoryBraid: (await readJson(path.join(this.k.braid.root, 'latest.json'), null))?.epochHash || null,
+        crossHistoryBraid: braid?.epochHash || null,
         historyCourt: federation.historyCourt,
         recoveryContracts: {
           registryHash: contractRegistry.registryHash,
@@ -128,7 +129,7 @@ class LastSaviorArchive {
     const coreHash = digest(archiveCore);
     const forwardWitness = await this.k.forwardWitness.attest(coreHash, { purpose: 'last-savior-core', archiveId: archiveCore.id, federationId: federation.id, omegaEpochId: federation.omegaEpoch.id });
 
-    const bundle = await this.k.diaspora.createBundle(`${label}:evidence`, await this.evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness, spacetime, fossil }), {
+    const bundle = await this.k.diaspora.createBundle(`${label}:evidence`, await this.evidenceSources({ federation, rosetta, quaternary, seed, shadowLaws, forwardWitness, spacetime, fossil, braid }), {
       federationId: federation.id, omegaEpochId: federation.omegaEpoch.id, shadowLawId: shadowLaws.id,
       forwardWitnessSequence: forwardWitness.statement.sequence, forwardWitnessHash: forwardWitness.attestationHash,
       quaternaryGeneration: quaternary.generation, spacetimeGeneration: spacetime?.id || null, fossilId:fossil.id,
