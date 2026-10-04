@@ -11,7 +11,7 @@ function flag(args, name) { return args.includes(name); }
 function nonflags(args) { return args.filter(x => !x.startsWith('--')); }
 
 function usage() {
-  console.log(`JSONDB OMEGA FEDERATION CLI\n\n  status [--deep]\n\nEPOCHS\n  epoch-seal [label] [--deep-media] [--verify-archives]\n  epoch-verify [id] [--live]\n\nFEDERATION\n  federation-seal [label] [--compare=<ref>] [--merge-preview] [--window=N]\n  federation-verify [id] [--live]\n  continuity-proof <fromEpochId> [toEpochId]\n\nTIME WEAVE\n  weave-verify\n  weave-proof <fromEpochId> [toEpochId]\n\nTEMPORAL PARITY\n  parity-seal [window]\n  parity-inspect [id]\n  parity-recover [id] [--repair-in-place]\n\nHISTORY COURT\n  court <lineageA> <lineageB> [--merge-preview]\n  court-verify [id]\n\nQUATERNARY COLD STORAGE\n  quaternary-archive [label] [oligoBytes] [groupSize]\n  quaternary-recover [generation]\n  quaternary-restore <output-file> [generation]\n\nEVIDENCE DIASPORA\n  diaspora-bundle [label]\n  diaspora-scatter [bundleId] [copies]\n  diaspora-verify [placementId]\n\nNo npm. No package manager. No external database.\nHistory may be reconstructed into sandboxes; ambiguity is preserved instead of silently collapsed.\n`);
+  console.log(`JSONDB OMEGA FEDERATION CLI\n\n  status [--deep]\n\nEPOCHS\n  epoch-seal [label] [--deep-media] [--verify-archives]\n  epoch-verify [id] [--live]\n\nFEDERATION\n  federation-seal [label] [--compare=<ref>] [--merge-preview] [--window=N]\n  federation-verify [id] [--live]\n  continuity-proof <fromEpochId> [toEpochId]\n\nTIME WEAVE\n  weave-verify\n  weave-proof <fromEpochId> [toEpochId]\n\nTEMPORAL PARITY\n  parity-seal [window]\n  parity-inspect [id]\n  parity-recover [id] [--repair-in-place]\n\nHISTORY COURT\n  court <lineageA> <lineageB> [--merge-preview]\n  court-verify [id]\n\nQUATERNARY COLD STORAGE\n  quaternary-archive [label] [oligoBytes] [groupSize]\n  quaternary-recover [generation]\n  quaternary-restore <output-file> [generation]\n\nROSETTA RECOVERY SPEC\n  rosetta-create [label]\n  rosetta-verify [id]\n\nEVIDENCE DIASPORA\n  diaspora-bundle [label]\n  diaspora-scatter [bundleId] [copies]\n  diaspora-verify [placementId]\n\nLAST SAVIOR\n  last-savior [label] [--no-scatter] [--verify-archives]\n  last-savior-verify [id] [--live]\n\nNo npm. No package manager. No external database.\nHistory may be reconstructed into sandboxes; ambiguity is preserved instead of silently collapsed.\n`);
 }
 
 async function latestEvidenceSources() {
@@ -24,6 +24,7 @@ async function latestEvidenceSources() {
   await add('SEMANTIC-HOLOGRAM.json', path.join(kernel.hologram.root, 'latest.json'));
   await add('HISTORY-COURT.json', path.join(kernel.historyCourt.root, 'latest.json'));
   await add('CIVILIZATION-SEED.json', path.join(kernel.civilizationSeed.root, 'latest.json'));
+  await add('ROSETTA.json', path.join(kernel.rosetta.root, 'latest.json'));
   return rows;
 }
 
@@ -73,9 +74,18 @@ async function main() {
   if (cmd === 'quaternary-recover') { const result = await kernel.quaternary.recover(plain[0] || null); delete result.buffer; return out(result); }
   if (cmd === 'quaternary-restore') return out(await kernel.quaternary.restore(path.resolve(plain[0]), plain[1] || null));
 
+  if (cmd === 'rosetta-create') return out(await kernel.rosetta.create(plain[0] || 'federated-cli'));
+  if (cmd === 'rosetta-verify') return out(await kernel.rosetta.verify(plain[0] || null));
+
   if (cmd === 'diaspora-bundle') return out(await kernel.diaspora.createBundle(plain[0] || 'federated-cli', await latestEvidenceSources(), { source: 'omega-federation-cli' }));
   if (cmd === 'diaspora-scatter') return out(await kernel.diaspora.scatter(plain[0] || null, { copies: plain[1] ? Number(plain[1]) : undefined }));
   if (cmd === 'diaspora-verify') return out(await kernel.diaspora.verifyPlacement(plain[0] || null));
+
+  if (cmd === 'last-savior') return out(await kernel.lastSavior.create(plain[0] || 'federated-cli', {
+    scatter: !flag(args, '--no-scatter'),
+    verifyArchives: flag(args, '--verify-archives')
+  }));
+  if (cmd === 'last-savior-verify') return out(await kernel.lastSavior.verify(plain[0] || null, { live: flag(args, '--live') }));
 
   usage();
   process.exitCode = 2;
