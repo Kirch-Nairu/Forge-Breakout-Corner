@@ -170,10 +170,11 @@ class SemanticHologram {
     return { score: possible ? Math.round(earned / possible * 10000) / 100 : 0, details };
   }
 
-  async compare(world, id = null) {
-    await this.init();
+  async compare(world, id = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const record = id ? await readJson(path.join(this.records, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!record) return { status: 'ABSENT', confidence: 0 };
+    if (!record) return { status: 'ABSENT', confidence: 0, readOnly };
     const candidate = world || await this.liveWorld();
     const actual = this.worldSketch(candidate, { seed: record.seed, width: record.width, projections: record.projections });
     const names = new Set([...Object.keys(record.sketch.tables || {}), ...Object.keys(actual.tables || {})]);
@@ -190,8 +191,8 @@ class SemanticHologram {
     else if (confidence >= 70) status = 'PARTIAL_SHADOW';
     else if (confidence >= 40) status = 'WEAK_RESEMBLANCE';
     return {
-      format: 'JSONDB-SEMANTIC-HOLOGRAM-COMPARE-1', hologramId: record.id,
-      status, confidence, collectionCount: names.size, tables,
+      format: 'JSONDB-SEMANTIC-HOLOGRAM-COMPARE-2', hologramId: record.id,
+      readOnly, status, confidence, collectionCount: names.size, tables,
       doctrine: 'Hologram similarity is corroborating evidence only. It cannot authorize promotion and cannot invent missing records.'
     };
   }
