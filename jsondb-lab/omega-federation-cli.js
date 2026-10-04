@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
+const path = require('path');
 const { FederatedOmegaKernel } = require('./monster/federated-kernel');
+const { readJson } = require('./monster/jsonfs');
 
 const kernel = new FederatedOmegaKernel(__dirname);
 function out(value) { process.stdout.write(`${JSON.stringify(value, null, 2)}\n`); }
@@ -9,7 +11,20 @@ function flag(args, name) { return args.includes(name); }
 function nonflags(args) { return args.filter(x => !x.startsWith('--')); }
 
 function usage() {
-  console.log(`JSONDB OMEGA FEDERATION CLI\n\n  status [--deep]\n\nEPOCHS\n  epoch-seal [label] [--deep-media] [--verify-archives]\n  epoch-verify [id] [--live]\n\nFEDERATION\n  federation-seal [label] [--compare=<ref>] [--merge-preview] [--window=N]\n  federation-verify [id] [--live]\n  continuity-proof <fromEpochId> [toEpochId]\n\nTIME WEAVE\n  weave-verify\n  weave-proof <fromEpochId> [toEpochId]\n\nTEMPORAL PARITY\n  parity-seal [window]\n  parity-inspect [id]\n  parity-recover [id] [--repair-in-place]\n\nHISTORY COURT\n  court <lineageA> <lineageB> [--merge-preview]\n  court-verify [id]\n\nNo npm. No package manager. No external database.\nHistory may be reconstructed into sandboxes; ambiguity is preserved instead of silently collapsed.\n`);
+  console.log(`JSONDB OMEGA FEDERATION CLI\n\n  status [--deep]\n\nEPOCHS\n  epoch-seal [label] [--deep-media] [--verify-archives]\n  epoch-verify [id] [--live]\n\nFEDERATION\n  federation-seal [label] [--compare=<ref>] [--merge-preview] [--window=N]\n  federation-verify [id] [--live]\n  continuity-proof <fromEpochId> [toEpochId]\n\nTIME WEAVE\n  weave-verify\n  weave-proof <fromEpochId> [toEpochId]\n\nTEMPORAL PARITY\n  parity-seal [window]\n  parity-inspect [id]\n  parity-recover [id] [--repair-in-place]\n\nHISTORY COURT\n  court <lineageA> <lineageB> [--merge-preview]\n  court-verify [id]\n\nQUATERNARY COLD STORAGE\n  quaternary-archive [label] [oligoBytes] [groupSize]\n  quaternary-recover [generation]\n  quaternary-restore <output-file> [generation]\n\nEVIDENCE DIASPORA\n  diaspora-bundle [label]\n  diaspora-scatter [bundleId] [copies]\n  diaspora-verify [placementId]\n\nNo npm. No package manager. No external database.\nHistory may be reconstructed into sandboxes; ambiguity is preserved instead of silently collapsed.\n`);
+}
+
+async function latestEvidenceSources() {
+  const rows = [];
+  const add = async (name, file) => { if (await readJson(file, null).catch(() => null)) rows.push({ name, path: file }); };
+  await add('FEDERATION.json', path.join(kernel.federation.root, 'latest.json'));
+  await add('OMEGA-EPOCH.json', path.join(kernel.epochSealer.root, 'latest.json'));
+  await add('TIME-WEAVE.json', path.join(kernel.timeWeave.root, 'latest.json'));
+  await add('TEMPORAL-PARITY.json', path.join(kernel.temporalParity.root, 'latest.json'));
+  await add('SEMANTIC-HOLOGRAM.json', path.join(kernel.hologram.root, 'latest.json'));
+  await add('HISTORY-COURT.json', path.join(kernel.historyCourt.root, 'latest.json'));
+  await add('CIVILIZATION-SEED.json', path.join(kernel.civilizationSeed.root, 'latest.json'));
+  return rows;
 }
 
 async function main() {
@@ -53,6 +68,14 @@ async function main() {
 
   if (cmd === 'court') return out(await kernel.historyCourt.compare(plain[0], plain[1], { previewMerge: flag(args, '--merge-preview') }));
   if (cmd === 'court-verify') return out(await kernel.historyCourt.verify(plain[0] || null));
+
+  if (cmd === 'quaternary-archive') return out(await kernel.archiveWorldQuaternary(plain[0] || 'federated-cli', { oligoBytes: Number(plain[1] || 512), groupSize: Number(plain[2] || 8) }));
+  if (cmd === 'quaternary-recover') { const result = await kernel.quaternary.recover(plain[0] || null); delete result.buffer; return out(result); }
+  if (cmd === 'quaternary-restore') return out(await kernel.quaternary.restore(path.resolve(plain[0]), plain[1] || null));
+
+  if (cmd === 'diaspora-bundle') return out(await kernel.diaspora.createBundle(plain[0] || 'federated-cli', await latestEvidenceSources(), { source: 'omega-federation-cli' }));
+  if (cmd === 'diaspora-scatter') return out(await kernel.diaspora.scatter(plain[0] || null, { copies: plain[1] ? Number(plain[1]) : undefined }));
+  if (cmd === 'diaspora-verify') return out(await kernel.diaspora.verifyPlacement(plain[0] || null));
 
   usage();
   process.exitCode = 2;
