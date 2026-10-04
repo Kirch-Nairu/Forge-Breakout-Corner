@@ -125,7 +125,7 @@ class StatePassportOffice {
     let live = null;
     if (options.live === true) {
       const world = await this.world();
-      const canonical = await this.canonicalQuorum.verify(world, { freezeOnDivergence: false });
+      const canonical = await this.canonicalQuorum.verify(world, { freezeOnDivergence: false, readOnly });
       live = {
         worldSemanticSha256: canonical.semanticSha256,
         matchesPassport: canonical.semanticSha256 === passport.worldSemanticSha256,
@@ -133,7 +133,7 @@ class StatePassportOffice {
       };
     }
     return {
-      format: 'JSONDB-STATE-PASSPORT-VERIFY-2', id: passport.id,
+      format: 'JSONDB-STATE-PASSPORT-VERIFY-3', id: passport.id,
       valid: staticValid && (!polyhash || polyhash.valid) && (!live || live.matchesPassport),
       readOnly,
       staticValid, polyhash, live,
