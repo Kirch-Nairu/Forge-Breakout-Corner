@@ -83,6 +83,7 @@ class RecoveryPlanMutationLab {
     const baselineVerify = await this.k.recoveryNavigator.verify(baselinePlan.id);
     const baseline = {
       planId: baselinePlan.id,
+      planHash: baselinePlan.planHash,
       status: baselinePlan.status,
       source: baselinePlan.source,
       verified: baselineVerify.valid,
@@ -140,17 +141,18 @@ class RecoveryPlanMutationLab {
     return record;
   }
 
-  async verify(id = null) {
-    await this.init();
+  async verify(id = null, options = {}) {
+    if (options.readOnly !== true) await this.init();
     const { readJson } = require('./jsonfs');
     const record = id ? await readJson(path.join(this.records, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!record) return { valid: false, status: 'ABSENT' };
+    if (!record) return { valid: false, status: 'ABSENT', readOnly: options.readOnly === true };
     const copy = { ...record }; delete copy.mutationHash;
     const staticValid = digest(copy) === record.mutationHash;
     const coreCopy = { ...record }; delete coreCopy.coreHash; delete coreCopy.cryptoCouncil; delete coreCopy.forwardWitness; delete coreCopy.mutationHash;
     const coreValid = digest(coreCopy) === record.coreHash;
+    const readOnly = options.readOnly === true;
     const [policy, crypto, forward] = await Promise.all([
-      this.k.policyCheckpoint.verify(record.policyCheckpoint?.id || null).catch(error => ({ valid: false, error: error.message })),
+      this.k.policyCheckpoint.verify(record.policyCheckpoint?.id || null, { readOnly }).catch(error => ({ valid: false, error: error.message })),
       this.k.cryptoCouncil.verify(record.cryptoCouncil?.id).catch(error => ({ valid: false, error: error.message })),
       this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message }))
     ]);
@@ -159,16 +161,18 @@ class RecoveryPlanMutationLab {
     const cryptoValid = Boolean(crypto.valid && crypto.worldRoot === record.coreHash && Number(crypto.familyQuorum || 0) >= 2);
     const noUnsafe = Number(record.summary?.unsafe || 0) === 0;
     return {
-      format: 'JSONDB-RECOVERY-PLAN-MUTATION-VERIFY-1',
+      format: 'JSONDB-RECOVERY-PLAN-MUTATION-VERIFY-2',
       id: record.id,
       valid: staticValid && coreValid && policy.valid && cryptoValid && forwardValid && noUnsafe,
+      readOnly,
       staticValid,
       coreValid,
       policyCheckpointValid: policy.valid,
       cryptoCouncilValid: cryptoValid,
       forwardWitnessValid: forwardValid,
       noUnsafeMutations: noUnsafe,
-      summary: record.summary
+      summary: record.summary,
+      doctrine: 'Mutation artifact verification may recurse through its policy checkpoint without materializing policy history.'
     };
   }
 }
