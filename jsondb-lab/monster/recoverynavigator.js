@@ -193,7 +193,7 @@ class RecoveryNavigator {
     }
 
     const plan = {
-      format: 'JSONDB-RECOVERY-NAVIGATOR-3',
+      format: 'JSONDB-RECOVERY-NAVIGATOR-4',
       id: `${Date.now()}-${crypto.randomBytes(5).toString('hex')}`,
       at: now(), goal,
       status: blockers.length ? 'BLOCKED' : 'PLAN_READY',
@@ -223,15 +223,16 @@ class RecoveryNavigator {
     const authoritySafe = plan.authority?.writesCanonicalState === false && plan.authority?.automaticCanonicalPromotion === false;
     const terminal = [...(plan.firewall || [])].reverse().find(x => x.action === 'PROMOTE_CANONICAL');
     const terminalPromotionDenied = Boolean(terminal && terminal.allowed === false);
-    const [historicalContracts, currentContracts, firewallLedger] = await Promise.all([
+    const [historicalContracts, currentContracts, firewallReferences, liveFirewall] = await Promise.all([
       this.k.recoveryContracts.version(plan.contractRegistryHash).catch(() => null),
       this.k.recoveryContracts.init().catch(() => null),
+      this.k.authorityFirewall ? this.k.authorityFirewall.verifyReferences(plan.firewall || []).catch(error => ({ valid: false, error: error.message })) : Promise.resolve({ valid: true }),
       this.k.authorityFirewall ? this.k.authorityFirewall.verifyLedger().catch(error => ({ valid: false, error: error.message })) : Promise.resolve({ valid: true })
     ]);
     const historicalRegistryAvailable = Boolean(historicalContracts?.registryHash && historicalContracts.registryHash === plan.contractRegistryHash);
     const currentRegistryMatches = Boolean(currentContracts?.registryHash && currentContracts.registryHash === plan.contractRegistryHash);
     return {
-      valid: computed === plan.planHash && authoritySafe && terminalPromotionDenied && historicalRegistryAvailable && firewallLedger.valid === true,
+      valid: computed === plan.planHash && authoritySafe && terminalPromotionDenied && historicalRegistryAvailable && firewallReferences.valid === true,
       id: plan.id,
       goal: plan.goal,
       status: plan.status,
@@ -242,7 +243,10 @@ class RecoveryNavigator {
       historicalRegistryAvailable,
       currentRegistryMatches,
       policyDriftedSincePlan: historicalRegistryAvailable && !currentRegistryMatches,
-      firewallLedgerValid: firewallLedger.valid,
+      firewallReferencesValid: firewallReferences.valid,
+      firewallPrefixValid: firewallReferences.prefix?.valid,
+      liveFirewallLedgerValid: liveFirewall.valid,
+      futureTailIncident: firewallReferences.valid === true && liveFirewall.valid === false,
       blockers: plan.blockers || []
     };
   }
