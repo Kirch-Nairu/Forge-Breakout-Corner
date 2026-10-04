@@ -79,8 +79,7 @@ class OmegaEpochSealer {
       seed: canonical.semanticSha256,
       domains: options.domainFailureProbabilities || {
         'disk-a': .02, 'disk-b': .02, 'disk-c': .02, 'disk-d': .02,
-        'cold-media': .01, 'software-node': .01,
-        'runtime-node': .02, 'runtime-python': .02,
+        'cold-media': .01, 'software-node': .01, 'runtime-node': .02, 'runtime-python': .02,
         'metadata-media': .01
       }
     });
@@ -155,15 +154,16 @@ class OmegaEpochSealer {
   }
 
   async verify(id = null, options = {}) {
-    await this.init();
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const epoch = id ? requireEpoch(await require('./jsonfs').readJson(path.join(this.epochs, `${id}.json`), null)) : requireEpoch(await require('./jsonfs').readJson(path.join(this.root, 'latest.json'), null));
     const copy = { ...epoch }; delete copy.epochHash; delete copy.polyhash;
     const computedEpochHash = digest(copy);
     const staticValid = computedEpochHash === epoch.epochHash;
     const polyhashTarget = { ...copy, epochHash: epoch.epochHash };
-    const polyhash = epoch.polyhash ? await this.k.polyhash.verify(polyhashTarget, epoch.polyhash) : null;
-    const passport = await this.passports.verify(epoch.statePassport.id, { live: options.live === true });
-    const compatibility = await this.k.compatibility.verify(epoch.compatibility.id);
+    const polyhash = epoch.polyhash ? await this.k.polyhash.verify(polyhashTarget, epoch.polyhash, { readOnly }) : null;
+    const passport = await this.passports.verify(epoch.statePassport.id, { live: options.live === true, readOnly });
+    const compatibility = await this.k.compatibility.verify(epoch.compatibility.id, { readOnly });
     let live = null;
     if (options.live === true) {
       const world = await this.k.world();
@@ -171,8 +171,9 @@ class OmegaEpochSealer {
       live = { semanticWorldSha256: canonical.semanticSha256, matchesEpoch: canonical.semanticSha256 === epoch.semanticWorldSha256 };
     }
     return {
-      format: 'JSONDB-OMEGA-EPOCH-VERIFY-1', id: epoch.id,
+      format: 'JSONDB-OMEGA-EPOCH-VERIFY-2', id: epoch.id,
       valid: staticValid && (!polyhash || polyhash.valid) && passport.valid && compatibility.valid && (!live || live.matchesEpoch),
+      readOnly,
       staticValid, expectedEpochHash: epoch.epochHash, computedEpochHash,
       polyhash, passport, compatibility, live,
       confidenceClass: epoch.statePassport.confidenceClass,
