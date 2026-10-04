@@ -1,8 +1,9 @@
 'use strict';
 
-const path=require('path');const crypto=require('crypto');
+const fsp=require('fs/promises');const path=require('path');const crypto=require('crypto');
 const {now,ensureDir,atomicJson,readJson}=require('./jsonfs');
 function hash(v){return crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');}
+function registryContentHash(registry){if(!registry)return null;const copy={...registry};delete copy.registryHash;return hash(copy);}
 
 class RecoveryContractRegistry{
  constructor(savior){
@@ -11,17 +12,36 @@ class RecoveryContractRegistry{
   this.file=path.join(this.root,'registry.json');
   this.versions=path.join(this.root,'versions');
  }
- async persistVersion(registry){
-  if(!registry?.registryHash)return;
+ async persistVersion(registry,options={}){
+  if(!registry?.registryHash)return false;
+  const computed=registryContentHash(registry);
+  if(computed!==registry.registryHash){
+   if(options.strict!==false)throw new Error(`Recovery Contract registry hash mismatch: declared ${registry.registryHash}, computed ${computed}`);
+   return false;
+  }
   await ensureDir(this.versions);
   const file=path.join(this.versions,`${registry.registryHash}.json`);
   if(!(await readJson(file,null)))await atomicJson(file,registry);
+  return true;
+ }
+ async hydrateArchiveVersions(){
+  await ensureDir(this.root);await ensureDir(this.versions);
+  const names=(await fsp.readdir(this.root).catch(()=>[])).filter(name=>/^registry-.*\.json$/.test(name)&&name!=='registry.json');
+  let hydrated=0,skipped=0;
+  for(const name of names){
+   const archived=await readJson(path.join(this.root,name),null);
+   if(!archived?.registryHash){skipped++;continue;}
+   const ok=await this.persistVersion(archived,{strict:false});
+   if(ok)hydrated++;else skipped++;
+  }
+  return{archives:names.length,hydrated,skipped};
  }
  async init(){
   await ensureDir(this.root);await ensureDir(this.versions);
+  await this.hydrateArchiveVersions();
   let r=await readJson(this.file,null);
   if(!r||r.format!=='JSONDB-RECOVERY-CONTRACTS-5'){
-   if(r){await this.persistVersion(r);await atomicJson(path.join(this.root,`registry-archive-${Date.now()}.json`),r);}
+   if(r){await this.persistVersion(r,{strict:false});await atomicJson(path.join(this.root,`registry-archive-${Date.now()}.json`),r);}
    r=this.build();await atomicJson(this.file,r);
   }
   await this.persistVersion(r);
@@ -30,7 +50,11 @@ class RecoveryContractRegistry{
  async version(registryHash){
   if(!registryHash)return null;
   await ensureDir(this.versions);
-  return readJson(path.join(this.versions,`${registryHash}.json`),null);
+  let found=await readJson(path.join(this.versions,`${registryHash}.json`),null);
+  if(found)return found;
+  await this.hydrateArchiveVersions();
+  found=await readJson(path.join(this.versions,`${registryHash}.json`),null);
+  return found;
  }
  contract(id,kind,reconstructs,corroborates,dependencies,extra={}){return{id,kind,reconstructs,corroborates,dependencies,mayAutoRepair:extra.mayAutoRepair||[],mayNominate:Boolean(extra.mayNominate),mayAuthorize:Boolean(extra.mayAuthorize),mayPromoteCanonical:false,forbidden:[...(extra.forbidden||[]),'silent-canonical-promotion'],notes:extra.notes||[]};}
  build(){
@@ -67,7 +91,7 @@ class RecoveryContractRegistry{
  }
  async reset(){
   const old=await readJson(this.file,null);
-  if(old){await this.persistVersion(old);await atomicJson(path.join(this.root,`registry-reset-archive-${Date.now()}.json`),old);}
+  if(old){await this.persistVersion(old,{strict:false});await atomicJson(path.join(this.root,`registry-reset-archive-${Date.now()}.json`),old);}
   const r=this.build();await atomicJson(this.file,r);await this.persistVersion(r);return r;
  }
  async analyze(){
