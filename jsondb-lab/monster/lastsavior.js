@@ -154,9 +154,10 @@ class LastSaviorArchive {
   }
 
   async verify(id = null, options = {}) {
-    await this.init();
+    const readOnly = options.readOnly === true;
+    if (!readOnly) await this.init();
     const receipt = id ? await readJson(path.join(this.receipts, `${id}.json`), null) : await readJson(path.join(this.root, 'latest.json'), null);
-    if (!receipt) return { valid: false, status: 'ABSENT' };
+    if (!receipt) return { valid: false, status: 'ABSENT', readOnly };
     const copy = { ...receipt }; delete copy.archiveHash; delete copy.polyhash;
     const computed = digest(copy); const staticValid = computed === receipt.archiveHash;
     const coreCopy = { ...receipt }; delete coreCopy.coreHash; delete coreCopy.forwardWitness; delete coreCopy.evidenceBundle; delete coreCopy.physicalDiaspora; delete coreCopy.archiveHash; delete coreCopy.polyhash;
@@ -172,8 +173,8 @@ class LastSaviorArchive {
       this.k.forwardWitness.verifyAll().catch(error => ({ valid: false, error: error.message })),
       receipt.recoveryFamilies?.spacetimeArk ? this.k.spacetime.recover(receipt.recoveryFamilies.spacetimeArk).catch(error => ({ status:'ERROR', error:error.message })) : Promise.resolve({status:'NOT_PRESENT'}),
       receipt.recoveryFamilies?.semanticFossil?.id ? this.k.fossils.verify(receipt.recoveryFamilies.semanticFossil.id).catch(error=>({valid:false,error:error.message})) : Promise.resolve({valid:true,status:'NOT_PRESENT'}),
-      this.k.recoveryContracts.version(archivedContracts?.registryHash || null).catch(() => null),
-      this.k.recoveryContracts.init().catch(error => ({ registryHash:null, error:error.message }))
+      this.k.recoveryContracts.version(archivedContracts?.registryHash || null, { hydrate: !readOnly }).catch(() => null),
+      readOnly ? this.k.recoveryContracts.inspect().catch(error => ({ valid:false, registryHash:null, error:error.message })) : this.k.recoveryContracts.init().catch(error => ({ registryHash:null, error:error.message }))
     ]);
     if (quaternary?.buffer) delete quaternary.buffer;
     const shadowChallenge = options.live === true && shadowRecord.valid ? await this.k.shadowLaws.challenge(null, receipt.corroborationFamilies.shadowLaws.id).catch(error => ({ status: 'ERROR', confidence: 0, error: error.message })) : null;
@@ -194,7 +195,8 @@ class LastSaviorArchive {
       historicalRegistryHashValid &&
       historicalContractsNoAutoPromoters
     );
-    const currentContractRegistryMatchesArchive = Boolean(archivedContracts?.registryHash && currentContracts?.registryHash === archivedContracts.registryHash);
+    const currentContractRegistryHealthy = readOnly ? currentContracts?.valid === true : Boolean(currentContracts?.registryHash);
+    const currentContractRegistryMatchesArchive = Boolean(currentContractRegistryHealthy && archivedContracts?.registryHash && currentContracts?.registryHash === archivedContracts.registryHash);
 
     const independent = {
       federation: federation.valid === true,
@@ -216,9 +218,10 @@ class LastSaviorArchive {
     const historicalValid = staticValid && coreValid && independent.federation && independent.rosetta && independent.civilizationSeed && independent.quaternary && independent.spacetime && independent.semanticFossil && independent.recoveryContractsAtArchive && independent.shadowLawRecord && independent.forwardWitness && independent.polyhash && (independent.shadowLawLive !== false);
 
     return {
-      format: 'JSONDB-LAST-SAVIOR-VERIFY-7',
+      format: 'JSONDB-LAST-SAVIOR-VERIFY-8',
       id: receipt.id,
       valid: historicalValid,
+      readOnly,
       historicalValid,
       staticValid,
       coreValid,
@@ -241,6 +244,7 @@ class LastSaviorArchive {
         historicalRegistryAvailable: Boolean(historicalContracts),
         historicalRegistryHashValid,
         historicalContractsNoAutoPromoters,
+        currentRegistryHealthy: currentContractRegistryHealthy,
         currentRegistryHash: currentContracts?.registryHash || null,
         currentRegistryMatchesArchive: currentContractRegistryMatchesArchive
       },
@@ -249,7 +253,7 @@ class LastSaviorArchive {
       forwardWitness: { valid: forwardValid, chainValid: forwardChain.valid, record: forwardRecord },
       diaspora,
       polyhash,
-      doctrine: 'Historical archive validity is resolved against the archived content-addressed Recovery Contract registry. Later policy drift is reported separately and does not retroactively invalidate the archive.'
+      doctrine: 'Historical archive validity is resolved against the archived content-addressed Recovery Contract registry. Later policy drift is reported separately and does not retroactively invalidate the archive. Read-only verification does not hydrate policy history.'
     };
   }
 }
