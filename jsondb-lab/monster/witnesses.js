@@ -82,23 +82,28 @@ class WitnessCouncil {
     return this.verifyRound(record);
   }
 
-  async verifyRound(roundOrId = null) {
-    const council = await this.init();
+  async verifyRound(roundOrId = null, options = {}) {
+    const readOnly = options.readOnly === true;
+    const council = readOnly ? await readJson(this.councilFile, null) : await this.init();
+    if (!council) return { valid: false, status: 'ABSENT', readOnly, reason: 'witness council not found', threshold: this.threshold };
     let round = roundOrId;
     if (!roundOrId) round = await readJson(path.join(this.root, 'latest-round.json'), null);
     else if (typeof roundOrId === 'string') round = await readJson(path.join(this.rounds, `${roundOrId}.json`), null);
-    if (!round) return { valid: false, reason: 'round not found', threshold: council.threshold };
+    if (!round) return { valid: false, status: 'ABSENT', readOnly, reason: 'round not found', threshold: council.threshold };
     const results = [];
     const seen = new Set();
     for (const att of round.attestations || []) {
       const member = council.members.find(m => m.id === att.witness);
-      const valid = Boolean(member && !seen.has(att.witness) && this.verifySignature(round.statement, att, member));
+      const valid = Boolean(member && !member.revokedAt && !seen.has(att.witness) && this.verifySignature(round.statement, att, member));
       if (valid) seen.add(att.witness);
       results.push({ witness: att.witness, valid });
     }
     const validSignatures = results.filter(x => x.valid).length;
     return {
+      format: 'JSONDB-WITNESS-VERIFY-2',
       valid: validSignatures >= council.threshold,
+      status: validSignatures >= council.threshold ? 'THRESHOLD_VALID' : 'INSUFFICIENT_VALID_SIGNATURES',
+      readOnly,
       threshold: council.threshold, memberCount: council.members.length,
       validSignatures, invalidSignatures: results.length - validSignatures,
       statement: round.statement, results
