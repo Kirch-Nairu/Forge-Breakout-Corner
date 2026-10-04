@@ -152,25 +152,8 @@ async function snapshotTree(root) {
   return rows;
 }
 
-async function snapshotPolicySurface() {
-  const surfaces = {
-    recoveryContracts: kernel.recoveryContracts.root,
-    authorityFirewall: kernel.authorityFirewall.root,
-    recoveryNavigator: kernel.recoveryNavigator.root,
-    policyCheckpoint: kernel.policyCheckpoint.root,
-    proofPlan: kernel.proofPlan.root,
-    planMutation: kernel.planMutation.root,
-    mutationAudit: kernel.mutationAudit.root,
-    lastSavior: kernel.lastSavior.root,
-    cryptoCouncil: kernel.cryptoCouncil.root,
-    forwardWitness: kernel.forwardWitness.root,
-    timeWeave: kernel.timeWeave.root,
-    historyCourt: kernel.historyCourt.root,
-    hashPolicy: kernel.polyhash.root
-  };
-  const out = {};
-  for (const [name, root] of Object.entries(surfaces)) out[name] = await snapshotTree(root);
-  return out;
+async function snapshotEvidenceSurface() {
+  return { saviorRoot: await snapshotTree(kernel.savior.root) };
 }
 
 function sameSnapshot(a, b) {
@@ -182,13 +165,33 @@ function changedSurfaces(before, after) {
   return [...names].filter(name => JSON.stringify(before?.[name] || []) !== JSON.stringify(after?.[name] || []));
 }
 
+function changedPaths(beforeRows = [], afterRows = []) {
+  const before = new Map(beforeRows.map(row => [row.path, JSON.stringify(row)]));
+  const after = new Map(afterRows.map(row => [row.path, JSON.stringify(row)]));
+  const paths = new Set([...before.keys(), ...after.keys()]);
+  return [...paths].filter(p => before.get(p) !== after.get(p)).sort();
+}
+
 async function main() {
   const readOnly = !bootstrap;
-  const before = readOnly ? await snapshotPolicySurface() : null;
+  const before = readOnly ? await snapshotEvidenceSurface() : null;
 
   if (bootstrap) await kernel.init();
 
   const checks = [];
+  checks.push(await check('canonical-quorum-forensic-probe', async () => {
+    const result = await kernel.canonicalQuorum.verify({
+      format: 'JSONDB-FORENSIC-CANONICAL-PROBE-1',
+      rows: [{ id: 'b', value: 2 }, { id: 'a', value: 1 }],
+      nested: { z: 2, a: 1 }
+    }, { readOnly: true, freezeOnDivergence: false });
+    return {
+      valid: result.unanimous === true && result.readOnly === true,
+      status: result.unanimous ? 'UNANIMOUS' : 'DIVERGED',
+      semanticSha256: result.semanticSha256,
+      implementations: result.outputs?.length || 0
+    };
+  }, { absentOkay: false }));
   checks.push(await check('recovery-contracts', () => bootstrap ? kernel.recoveryContracts.analyze() : kernel.recoveryContracts.inspect()));
   checks.push(await check('authority-firewall-ledger', () => kernel.authorityFirewall.verifyLedger({ readOnly })));
   checks.push(await check('crypto-council', () => kernel.cryptoCouncil.verify(null, { readOnly })));
@@ -201,9 +204,10 @@ async function main() {
   checks.push(await check('latest-history-court', () => kernel.historyCourt.verify(null, { readOnly })));
   checks.push(await check('latest-last-savior', () => kernel.lastSavior.verify(null, { live: false, readOnly })));
 
-  const after = readOnly ? await snapshotPolicySurface() : null;
-  const policySurfaceUnchanged = readOnly ? sameSnapshot(before, after) : null;
+  const after = readOnly ? await snapshotEvidenceSurface() : null;
+  const evidenceSurfaceUnchanged = readOnly ? sameSnapshot(before, after) : null;
   const mutatedSurfaces = readOnly ? changedSurfaces(before, after) : [];
+  const mutatedPaths = readOnly ? changedPaths(before?.saviorRoot || [], after?.saviorRoot || []) : [];
   if (readOnly) {
     checks.push({
       name: 'forensic-write-barrier-clear',
@@ -213,25 +217,27 @@ async function main() {
     });
     checks.push({
       name: 'forensic-evidence-surface-unchanged',
-      ok: policySurfaceUnchanged,
+      ok: evidenceSurfaceUnchanged,
       absent: false,
       value: {
-        valid: policySurfaceUnchanged,
-        status: policySurfaceUnchanged ? 'UNCHANGED' : 'MUTATED',
-        mutatedSurfaces
+        valid: evidenceSurfaceUnchanged,
+        status: evidenceSurfaceUnchanged ? 'UNCHANGED' : 'MUTATED',
+        mutatedSurfaces,
+        mutatedPaths
       }
     });
   }
 
   const presentFailures = checks.filter(x => !x.ok);
   const report = {
-    format: 'JSONDB-RECOVERY-SELFTEST-4',
+    format: 'JSONDB-RECOVERY-SELFTEST-5',
     mode: bootstrap ? 'BOOTSTRAP_AND_VERIFY' : 'FORENSIC_READ_ONLY',
     readOnly,
     writeBarrierActive: readOnly,
     ok: presentFailures.length === 0,
-    policySurfaceUnchanged,
+    evidenceSurfaceUnchanged,
     mutatedSurfaces,
+    mutatedPaths,
     blockedWriteAttempts: blockedWrites,
     checks: checks.map(x => ({
       name: x.name,
@@ -244,8 +250,8 @@ async function main() {
     })),
     failures: presentFailures.map(x => x.name),
     doctrine: bootstrap
-      ? 'Bootstrap mode may initialize and migrate recovery metadata before verification.'
-      : 'Forensic mode installs a fail-closed filesystem write barrier before the recovery kernel is loaded, then compares content and inode/device/link/mode/mtime/ctime evidence across recovery and trust surfaces. Access time is intentionally excluded. ABSENT optional artifacts do not fail the self-test; present invalid artifacts and any attempted write do.'
+      ? 'Bootstrap mode may initialize and migrate recovery metadata before verification; the canonical probe remains explicitly forensic.'
+      : 'Forensic mode installs a fail-closed filesystem write barrier before the recovery kernel is loaded, runs a deterministic read-only canonicalization probe, and compares content plus inode/device/link/mode/mtime/ctime evidence across the entire Savior tree. Access time is intentionally excluded. ABSENT optional artifacts do not fail the self-test; present invalid artifacts and any attempted write do.'
   };
 
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
