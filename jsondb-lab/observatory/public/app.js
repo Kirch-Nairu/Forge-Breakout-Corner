@@ -30,6 +30,17 @@ const familyColors = {
   filesystem: '#87929a'
 };
 
+const AUDIO_MODES = ['off', 'minimal', 'reactive', 'cinematic'];
+let audioMode = localStorage.getItem('kirion-audio-mode') || 'reactive';
+if (!AUDIO_MODES.includes(audioMode)) audioMode = 'reactive';
+let audioVolume = Number(localStorage.getItem('kirion-audio-volume') || 0.16);
+if (!Number.isFinite(audioVolume)) audioVolume = 0.16;
+audioVolume = Math.min(0.5, Math.max(0.02, audioVolume));
+let audioContext = null;
+let audioMaster = null;
+let ambientNodes = [];
+let lastAudioAt = 0;
+
 function el(id) { return document.getElementById(id); }
 function text(id, value) { const node = el(id); if (node) node.textContent = value == null ? '—' : String(value); }
 function shortHash(value) { return value ? `${String(value).slice(0, 12)}…` : '—'; }
@@ -46,12 +57,188 @@ function setTone(node, value) {
   else if (/(read-only|degraded|warning|unknown|absent)/.test(v)) node.classList.add('warn');
 }
 
+function ensureAudioContext() {
+  if (audioContext) {
+    if (audioContext.state === 'suspended') audioContext.resume().catch(() => {});
+    return audioContext;
+  }
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  if (!Ctor) return null;
+  audioContext = new Ctor();
+  audioMaster = audioContext.createGain();
+  audioMaster.gain.value = audioVolume;
+  audioMaster.connect(audioContext.destination);
+  syncAmbientAudio();
+  return audioContext;
+}
+
+function stopAmbientAudio() {
+  for (const node of ambientNodes) {
+    try { node.stop?.(); } catch {}
+    try { node.disconnect?.(); } catch {}
+  }
+  ambientNodes = [];
+}
+
+function syncAmbientAudio() {
+  stopAmbientAudio();
+  if (audioMode !== 'cinematic' || !audioContext || !audioMaster) return;
+  const low = audioContext.createOscillator();
+  const lowGain = audioContext.createGain();
+  const air = audioContext.createOscillator();
+  const airGain = audioContext.createGain();
+  low.type = 'sine';
+  low.frequency.value = 43;
+  lowGain.gain.value = 0.012;
+  air.type = 'triangle';
+  air.frequency.value = 86;
+  airGain.gain.value = 0.005;
+  low.connect(lowGain); lowGain.connect(audioMaster);
+  air.connect(airGain); airGain.connect(audioMaster);
+  low.start(); air.start();
+  ambientNodes = [low, lowGain, air, airGain];
+}
+
+function audioTone({ frequency = 440, duration = 0.05, type = 'sine', gain = 0.06, slideTo = null, delay = 0 }) {
+  if (audioMode === 'off') return;
+  const ctx = ensureAudioContext();
+  if (!ctx || !audioMaster) return;
+  const start = ctx.currentTime + Math.max(0, delay);
+  const oscillator = ctx.createOscillator();
+  const localGain = ctx.createGain();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(Math.max(20, frequency), start);
+  if (slideTo != null) oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), start + duration);
+  localGain.gain.setValueAtTime(0.0001, start);
+  localGain.gain.exponentialRampToValueAtTime(Math.max(0.001, gain), start + Math.min(0.014, duration / 3));
+  localGain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+  oscillator.connect(localGain);
+  localGain.connect(audioMaster);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.02);
+}
+
+function playObservationSound(event) {
+  if (audioMode === 'off') return;
+  const now = performance.now();
+  const urgent = event.severity === 'error' || /(ERROR|FAIL|CORRUPT|DENY|PANIC)/i.test(String(event.type || ''));
+  if (!urgent && now - lastAudioAt < (audioMode === 'minimal' ? 180 : 42)) return;
+  lastAudioAt = now;
+  const family = event.family || 'filesystem';
+
+  if (urgent) {
+    audioTone({ frequency: 205, duration: 0.13, type: 'sawtooth', gain: 0.07, slideTo: 118 });
+    audioTone({ frequency: 148, duration: 0.17, type: 'sawtooth', gain: 0.05, delay: 0.07, slideTo: 82 });
+    return;
+  }
+
+  if (audioMode === 'minimal') {
+    if (family === 'recovery') return audioTone({ frequency: 196, duration: 0.09, type: 'sine', gain: 0.04, slideTo: 294 });
+    if (family === 'history') return audioTone({ frequency: 330, duration: 0.07, type: 'triangle', gain: 0.035 });
+    return audioTone({ frequency: 520, duration: 0.035, type: 'sine', gain: 0.025 });
+  }
+
+  if (family === 'wal') {
+    audioTone({ frequency: 420, duration: 0.032, type: 'square', gain: 0.025, slideTo: 610 });
+    return audioTone({ frequency: 820, duration: 0.024, type: 'sine', gain: 0.025, delay: 0.024 });
+  }
+  if (family === 'data' || family === 'engine') {
+    audioTone({ frequency: 310, duration: 0.045, type: 'triangle', gain: 0.035, slideTo: 520 });
+    return audioTone({ frequency: 620, duration: 0.035, type: 'sine', gain: 0.025, delay: 0.03 });
+  }
+  if (family === 'index') {
+    audioTone({ frequency: 660, duration: 0.034, type: 'triangle', gain: 0.035 });
+    return audioTone({ frequency: 880, duration: 0.034, type: 'sine', gain: 0.026, delay: 0.026 });
+  }
+  if (family === 'history') {
+    audioTone({ frequency: 293.66, duration: 0.07, type: 'sine', gain: 0.04 });
+    return audioTone({ frequency: 440, duration: 0.08, type: 'sine', gain: 0.034, delay: 0.045 });
+  }
+  if (family === 'recovery') {
+    audioTone({ frequency: 146.83, duration: 0.11, type: 'triangle', gain: 0.045, slideTo: 220 });
+    audioTone({ frequency: 293.66, duration: 0.12, type: 'sine', gain: 0.032, delay: 0.045 });
+    return audioTone({ frequency: 440, duration: 0.13, type: 'sine', gain: 0.022, delay: 0.095 });
+  }
+  audioTone({ frequency: 460, duration: 0.035, type: 'sine', gain: 0.025 });
+}
+
+function renderAudioControl() {
+  const button = el('omegaSoundMode');
+  if (button) {
+    button.dataset.mode = audioMode;
+    button.textContent = `SOUND ${audioMode.toUpperCase()}`;
+  }
+  const slider = el('omegaSoundVolume');
+  if (slider) slider.value = String(Math.round(audioVolume * 200));
+}
+
+function setAudioMode(next) {
+  if (!AUDIO_MODES.includes(next)) return;
+  audioMode = next;
+  localStorage.setItem('kirion-audio-mode', audioMode);
+  if (audioMode !== 'off') ensureAudioContext();
+  syncAmbientAudio();
+  renderAudioControl();
+}
+
+function setAudioVolume(next) {
+  audioVolume = Math.min(0.5, Math.max(0.02, Number(next) || 0.16));
+  localStorage.setItem('kirion-audio-volume', String(audioVolume));
+  if (audioMaster && audioContext) audioMaster.gain.setTargetAtTime(audioVolume, audioContext.currentTime, 0.015);
+}
+
+function mountAudioControl() {
+  const host = document.querySelector('.top-actions');
+  if (!host || el('omegaSoundMode')) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'omega-sound-control';
+  const button = document.createElement('button');
+  button.id = 'omegaSoundMode';
+  button.className = 'ghost omega-sound-mode';
+  button.type = 'button';
+  button.addEventListener('click', () => setAudioMode(AUDIO_MODES[(AUDIO_MODES.indexOf(audioMode) + 1) % AUDIO_MODES.length]));
+  const label = document.createElement('label');
+  label.className = 'omega-sound-volume';
+  const caption = document.createElement('span');
+  caption.textContent = 'VOL';
+  const slider = document.createElement('input');
+  slider.id = 'omegaSoundVolume';
+  slider.type = 'range';
+  slider.min = '1';
+  slider.max = '100';
+  slider.addEventListener('input', event => setAudioVolume(Number(event.target.value) / 200));
+  label.append(caption, slider);
+  wrap.append(button, label);
+  host.prepend(wrap);
+  renderAudioControl();
+  window.addEventListener('pointerdown', () => {
+    if (audioMode !== 'off') ensureAudioContext();
+  }, { once: true });
+  window.addEventListener('storage', event => {
+    if (event.key === 'kirion-audio-mode' && AUDIO_MODES.includes(event.newValue)) {
+      audioMode = event.newValue;
+      if (audioMode !== 'off') ensureAudioContext();
+      syncAmbientAudio();
+      renderAudioControl();
+    }
+    if (event.key === 'kirion-audio-volume') {
+      const next = Number(event.newValue);
+      if (Number.isFinite(next)) {
+        audioVolume = Math.min(0.5, Math.max(0.02, next));
+        if (audioMaster && audioContext) audioMaster.gain.setTargetAtTime(audioVolume, audioContext.currentTime, 0.015);
+        renderAudioControl();
+      }
+    }
+  });
+}
+
 class FlowVisualizer {
   constructor(stageId, canvasId) {
     this.stage = el(stageId);
     this.canvas = el(canvasId);
     this.ctx = this.canvas.getContext('2d');
     this.particles = [];
+    this.edgeEnergy = new Map();
     this.edges = [
       ['app', 'tx'], ['tx', 'wal'], ['wal', 'current'],
       ['current', 'index'], ['current', 'history'], ['index', 'history'], ['history', 'savior']
@@ -87,22 +274,46 @@ class FlowVisualizer {
     node.classList.remove('pulse');
     void node.offsetWidth;
     node.classList.add('pulse');
-    setTimeout(() => node.classList.remove('pulse'), 520);
+    setTimeout(() => node.classList.remove('pulse'), 720);
+  }
+
+  burstLabel(event, color) {
+    const label = document.createElement('div');
+    label.className = `flow-burst-label family-${event.family || 'filesystem'}`;
+    label.textContent = `${String(event.family || 'filesystem').toUpperCase()} // ${event.type || 'OBSERVED'}`;
+    label.style.setProperty('--burst-color', color);
+    this.stage.appendChild(label);
+    setTimeout(() => label.remove(), 1100);
   }
 
   emit(event) {
     const from = this.point(event.from);
     const to = this.point(event.to);
     if (!from || !to) return;
-    const color = familyColors[event.family] || familyColors.filesystem;
-    this.particles.push({
-      from, to, color,
-      born: performance.now(),
-      duration: 520 + Math.random() * 260,
-      label: event.type || 'EVENT'
-    });
+    const family = event.family || 'filesystem';
+    const color = familyColors[family] || familyColors.filesystem;
+    const intense = family === 'recovery' || family === 'history' || event.severity === 'error';
+    const count = intense ? 11 : 7;
+    const now = performance.now();
+    for (let i = 0; i < count; i += 1) {
+      this.particles.push({
+        from, to, color,
+        born: now + i * (intense ? 34 : 27),
+        duration: 470 + Math.random() * 250,
+        label: event.type || 'EVENT',
+        size: i === 0 ? 4.8 : 1.8 + Math.random() * 2.4,
+        wobble: (Math.random() - 0.5) * 8,
+        alpha: i === 0 ? 1 : 0.5 + Math.random() * 0.38
+      });
+    }
+    this.edgeEnergy.set(`${event.from}>${event.to}`, 1);
     this.pulse(event.from);
-    setTimeout(() => this.pulse(event.to), 340);
+    setTimeout(() => this.pulse(event.to), 290);
+    this.stage.classList.remove('flow-surge', 'family-wal', 'family-data', 'family-engine', 'family-index', 'family-history', 'family-recovery', 'family-filesystem');
+    void this.stage.offsetWidth;
+    this.stage.classList.add('flow-surge', `family-${family}`);
+    setTimeout(() => this.stage.classList.remove('flow-surge', `family-${family}`), 920);
+    this.burstLabel(event, color);
   }
 
   drawEdge(fromName, toName) {
@@ -111,19 +322,25 @@ class FlowVisualizer {
     if (!a || !b) return;
     const ctx = this.ctx;
     const dx = b.x - a.x;
+    const key = `${fromName}>${toName}`;
+    const energy = this.edgeEnergy.get(key) || 0;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
     ctx.bezierCurveTo(a.x + dx * .45, a.y, b.x - dx * .45, b.y, b.x, b.y);
-    ctx.strokeStyle = 'rgba(89,106,117,.24)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = energy > 0.02 ? `rgba(101,230,255,${0.2 + energy * 0.62})` : 'rgba(89,106,117,.24)';
+    ctx.lineWidth = 1 + energy * 2.2;
+    ctx.shadowColor = energy > 0.02 ? '#65e6ff' : 'transparent';
+    ctx.shadowBlur = energy * 16;
     ctx.stroke();
+    ctx.shadowBlur = 0;
+    if (energy > 0.001) this.edgeEnergy.set(key, energy * 0.94);
   }
 
   particlePoint(p, t) {
     const eased = 1 - Math.pow(1 - t, 3);
     const dx = p.to.x - p.from.x;
-    const c1 = { x: p.from.x + dx * .45, y: p.from.y };
-    const c2 = { x: p.to.x - dx * .45, y: p.to.y };
+    const c1 = { x: p.from.x + dx * .45, y: p.from.y + p.wobble };
+    const c2 = { x: p.to.x - dx * .45, y: p.to.y - p.wobble };
     const inv = 1 - eased;
     return {
       x: inv ** 3 * p.from.x + 3 * inv ** 2 * eased * c1.x + 3 * inv * eased ** 2 * c2.x + eased ** 3 * p.to.x,
@@ -137,24 +354,26 @@ class FlowVisualizer {
     for (const edge of this.edges) this.drawEdge(...edge);
     this.particles = this.particles.filter(p => now - p.born < p.duration);
     for (const p of this.particles) {
+      if (now < p.born) continue;
       const t = Math.max(0, Math.min(1, (now - p.born) / p.duration));
       const point = this.particlePoint(p, t);
       const ctx = this.ctx;
+      ctx.globalAlpha = p.alpha * (1 - t * 0.2);
       ctx.beginPath();
-      ctx.arc(point.x, point.y, 3.4, 0, Math.PI * 2);
+      ctx.arc(point.x, point.y, p.size, 0, Math.PI * 2);
       ctx.fillStyle = p.color;
       ctx.shadowColor = p.color;
-      ctx.shadowBlur = 14;
+      ctx.shadowBlur = 18 + p.size * 2;
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.beginPath();
-      const trailT = Math.max(0, t - .07);
+      const trailT = Math.max(0, t - .11);
       const trail = this.particlePoint(p, trailT);
       ctx.moveTo(trail.x, trail.y);
       ctx.lineTo(point.x, point.y);
       ctx.strokeStyle = p.color;
-      ctx.globalAlpha = .45;
-      ctx.lineWidth = 1.4;
+      ctx.globalAlpha = p.alpha * .42;
+      ctx.lineWidth = Math.max(1, p.size * .7);
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
@@ -325,7 +544,6 @@ function addActivity(event) {
     row.append(header, source);
     list.appendChild(row);
   }
-  text('event-inspector', '');
   const inspector = el('event-inspector');
   inspector.replaceChildren();
   const label = document.createElement('span');
@@ -333,11 +551,24 @@ function addActivity(event) {
   const code = document.createElement('code');
   code.textContent = `${event.type} :: ${event.source || 'unknown'} :: ${event.mutation || 'observed'}`;
   inspector.append(label, code);
+  inspector.classList.remove('live-impact');
+  void inspector.offsetWidth;
+  inspector.classList.add('live-impact');
+}
+
+function dramatizeObservation(event) {
+  const family = event.family || 'filesystem';
+  document.body.classList.remove('observatory-impact', 'impact-wal', 'impact-data', 'impact-engine', 'impact-index', 'impact-history', 'impact-recovery', 'impact-filesystem');
+  void document.body.offsetWidth;
+  document.body.classList.add('observatory-impact', `impact-${family}`);
+  setTimeout(() => document.body.classList.remove('observatory-impact', `impact-${family}`), 720);
+  playObservationSound(event);
 }
 
 function handleEvent(event) {
   addActivity(event);
   state.visualizers.forEach(v => v.emit(event));
+  dramatizeObservation(event);
   document.dispatchEvent(new CustomEvent('observatory:event', { detail: event }));
   clearTimeout(handleEvent.refreshTimer);
   handleEvent.refreshTimer = setTimeout(loadSnapshot, 220);
@@ -358,6 +589,7 @@ function connectEvents() {
 
 function init() {
   setupNavigation();
+  mountAudioControl();
   state.visualizers.push(new FlowVisualizer('overview-flow-stage', 'overview-flow-canvas'));
   state.visualizers.push(new FlowVisualizer('flow-stage', 'flow-canvas'));
   el('refresh').addEventListener('click', loadSnapshot);
