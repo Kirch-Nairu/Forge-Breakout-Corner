@@ -1,0 +1,46 @@
+name: KIRION POTATO-16 Bootstrap
+
+on:
+  push:
+    branches:
+      - KIRION-POTATO16-FACTORY-BOOTSTRAP
+    paths:
+      - 'kirion-factory/**'
+      - '.github/workflows/kirion-potato16-bootstrap.yml'
+  pull_request:
+    paths:
+      - 'kirion-factory/**'
+      - '.github/workflows/kirion-potato16-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: kirion-factory
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        shell: bash
+        run: |
+          node --check ./bin/kirion.js
+          node --check ./src/control/server.js
+          node --check ./src/worker/server.js
+          node --check ./src/llm/llama-client.js
+          node --check ./src/runner/worktree.js
+          node --check ./selftest.js
+      - name: POTATO-16 selftest
+        run: npm test
+      - name: Hardware profiler smoke test
+        run: node ./bin/kirion.js profile

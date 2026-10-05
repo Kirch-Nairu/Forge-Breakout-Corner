@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KIRION Software Factory</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <p class="eyebrow">KIRION SOFTWARE FACTORY</p>
+        <h1>POTATO-16 / Bootstrap Control</h1>
+      </div>
+      <div id="status" class="status">checking worker…</div>
+    </header>
+
+    <section class="panel intake">
+      <h2>New engineering session</h2>
+      <label>Objective<textarea id="goal" placeholder="Add account deactivation with administrator approval and full audit history."></textarea></label>
+      <label>Local Git repository path<input id="repo" placeholder="C:\\code\\project or /home/kirch/project"></label>
+      <button id="start">Start discovery</button>
+      <p class="hint">The controller inspects Git first. The model is not allowed to mutate anything in this bootstrap stage.</p>
+    </section>
+
+    <section class="grid">
+      <aside class="panel">
+        <div class="panel-title"><h2>Episodes</h2><button id="refresh" class="ghost">Refresh</button></div>
+        <div id="episodes" class="episodes"></div>
+      </aside>
+
+      <section class="panel workspace">
+        <div id="empty">Select or create an episode.</div>
+        <div id="detail" hidden>
+          <div class="detail-head"><div><p class="eyebrow" id="episodeId"></p><h2 id="episodeGoal"></h2></div><span id="episodeState" class="badge"></span></div>
+          <div id="repoFacts" class="facts"></div>
+          <div id="actions"></div>
+          <div id="questionBox" class="question" hidden>
+            <p class="eyebrow">TARGETED QUESTION</p>
+            <h3 id="questionText"></h3>
+            <p id="questionWhy"></p>
+            <textarea id="answer" placeholder="Your decision…"></textarea>
+            <button id="submitAnswer">Submit answer</button>
+          </div>
+          <pre id="workPackage" class="code" hidden></pre>
+        </div>
+      </section>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
