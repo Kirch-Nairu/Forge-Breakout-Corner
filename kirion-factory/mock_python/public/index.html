@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KIRION Closed-World Mock Factory</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">KIRION SOFTWARE FACTORY / NO-LLM PROVING GROUND</div>
+        <h1>Closed-World Python Mock Factory</h1>
+        <p>Finite questions → deterministic spec → sandboxed file writes → runnable mock app.</p>
+      </div>
+      <div id="kbBadge" class="badge">loading knowledge base…</div>
+    </header>
+
+    <section class="grid intro">
+      <article class="card">
+        <h2>Start a deterministic build</h2>
+        <label>App name <input id="name" value="KIRION Mock Operations App" maxlength="80"></label>
+        <button id="start" class="primary">Start closed-world build</button>
+        <p class="hint">The name is free text. Engineering decisions are closed-ended and knowledge-base driven.</p>
+      </article>
+      <article class="card stats" id="stats"></article>
+    </section>
+
+    <section id="workspace" class="workspace" hidden>
+      <div class="question-pane card">
+        <div class="progress-row"><span id="state"></span><strong id="progressText"></strong></div>
+        <div class="progress"><i id="progressBar"></i></div>
+        <div id="question"></div>
+        <div id="options" class="options"></div>
+        <div id="ready" hidden>
+          <h2>Decision-ready.</h2>
+          <p>All applicable closed-world questions are resolved. KIRION can now generate the mock app and engineering artifacts.</p>
+          <button id="generate" class="primary">Generate app + specs</button>
+        </div>
+      </div>
+
+      <aside class="card side">
+        <div class="side-head"><h2>Resolved decisions</h2><button id="reset" class="ghost">Reset</button></div>
+        <div id="resolved" class="resolved"></div>
+        <h3>Triggered knowledge</h3>
+        <div id="knowledge" class="knowledge"></div>
+      </aside>
+    </section>
+
+    <section id="generated" class="card generated" hidden>
+      <div>
+        <div class="eyebrow">GENERATED CANDIDATE</div>
+        <h2>Mock app written to the sandbox</h2>
+        <p id="generatedMeta"></p>
+      </div>
+      <div class="actions">
+        <a id="preview" class="primary link" target="_blank" rel="noreferrer">Open generated app</a>
+      </div>
+      <pre id="files"></pre>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
