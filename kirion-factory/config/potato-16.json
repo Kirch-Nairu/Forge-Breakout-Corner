@@ -1,0 +1,42 @@
+{
+  "profile": "POTATO-16",
+  "controller": {
+    "host": "127.0.0.1",
+    "port": 7340
+  },
+  "worker": {
+    "host": "127.0.0.1",
+    "port": 7350,
+    "url": "http://127.0.0.1:7350",
+    "mode": "COURTESY"
+  },
+  "llm": {
+    "baseUrl": "http://127.0.0.1:8080/v1",
+    "model": "bartowski/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M",
+    "contextTokens": 4096,
+    "maxOutputTokens": 1200,
+    "timeoutMs": 180000
+  },
+  "memory": {
+    "denyBelowFreeBytes": 4294967296,
+    "lightModelFreeBytes": 5368709120,
+    "codeModelFreeBytes": 7516192768
+  },
+  "budgets": {
+    "maxLlmCalls": 30,
+    "maxMutationRounds": 8,
+    "maxRepeatedFailure": 3,
+    "maxTestRounds": 10,
+    "maxChangedFiles": 15,
+    "maxEpisodeWallMs": 7200000
+  },
+  "stateDir": ".state",
+  "acceptedRoles": [
+    "INTERVIEWER",
+    "PLANNER",
+    "CODE_WRITER",
+    "FAILURE_ANALYST",
+    "REVIEWER",
+    "ACCEPTANCE"
+  ]
+}

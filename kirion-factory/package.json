@@ -1,0 +1,17 @@
+{
+  "name": "kirion-software-factory-bootstrap",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KIRION Software Factory POTATO-16 bootstrap runtime.",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "control": "node ./bin/kirion.js control",
+    "worker": "node ./bin/kirion.js worker",
+    "profile": "node ./bin/kirion.js profile",
+    "selftest": "node ./selftest.js",
+    "test": "node ./selftest.js"
+  }
+}
