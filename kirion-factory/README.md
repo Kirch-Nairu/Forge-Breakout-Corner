@@ -38,7 +38,13 @@ one inference at a time
 KIRION does not start llama.cpp in this stage. Run the local model server separately, for example:
 
 ```powershell
-llama serve -hf Qwen/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M --ctx-size 4096 --threads 4 --host 127.0.0.1 --port 8080
+llama serve -hf bartowski/Qwen2.5-Coder-3B-Instruct-GGUF:Q4_K_M --ctx-size 4096 --threads 4 --host 127.0.0.1 --port 8080
+```
+
+The current llama.cpp WinGet package can be installed with:
+
+```powershell
+winget install --id ggml.llamacpp -e
 ```
 
 ## Run
