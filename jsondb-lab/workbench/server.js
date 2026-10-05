@@ -31,7 +31,12 @@ const staticRoutes = new Map([
   ['/', ['index.html', 'text/html; charset=utf-8']],
   ['/index.html', ['index.html', 'text/html; charset=utf-8']],
   ['/styles.css', ['styles.css', 'text/css; charset=utf-8']],
-  ['/app.js', ['app.js', 'text/javascript; charset=utf-8']]
+  ['/sort-lab.css', ['sort-lab.css', 'text/css; charset=utf-8']],
+  ['/app.js', ['bootstrap.js', 'text/javascript; charset=utf-8']],
+  ['/core-app.js', ['app.js', 'text/javascript; charset=utf-8']],
+  ['/sort-core.js', ['sort-core.js', 'text/javascript; charset=utf-8']],
+  ['/audio.js', ['audio.js', 'text/javascript; charset=utf-8']],
+  ['/sort-lab.js', ['sort-lab.js', 'text/javascript; charset=utf-8']]
 ]);
 
 function headers(extra = {}) {
