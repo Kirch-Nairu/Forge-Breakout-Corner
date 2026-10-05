@@ -43,16 +43,57 @@ if (-not $server) {
     throw "llama.cpp installed but llama-server is not visible yet. Reopen PowerShell and rerun Start-Qwen-Dossier.ps1."
 }
 
-Write-Host "`n[KIRION] Forcing direct resumable GGUF download..." -ForegroundColor Magenta
+Write-Host "`n[KIRION] Forcing direct RESUMABLE GGUF download..." -ForegroundColor Magenta
 Write-Host "[KIRION] Target: $ModelFile" -ForegroundColor DarkGray
 
 $curl = Get-Command curl.exe -ErrorAction Stop
-& $curl.Source -L --fail --retry 20 --retry-delay 3 --connect-timeout 30 -C - -o $ModelFile $ModelUrl
-if ($LASTEXITCODE -ne 0) { throw "Qwen GGUF download failed with curl exit code $LASTEXITCODE." }
+$downloadComplete = $false
+$maxOuterAttempts = 100
+
+for ($attempt = 1; $attempt -le $maxOuterAttempts; $attempt++) {
+    $existingBytes = 0
+    if (Test-Path $ModelFile) { $existingBytes = (Get-Item $ModelFile).Length }
+
+    if ($existingBytes -gt 0) {
+        Write-Host "[KIRION] Resume attempt $attempt/$maxOuterAttempts from $([math]::Round($existingBytes / 1MB, 1)) MiB..." -ForegroundColor Yellow
+    } else {
+        Write-Host "[KIRION] Download attempt $attempt/$maxOuterAttempts..." -ForegroundColor Yellow
+    }
+
+    & $curl.Source `
+        -L `
+        --fail `
+        --http1.1 `
+        --retry 8 `
+        --retry-all-errors `
+        --retry-delay 2 `
+        --connect-timeout 30 `
+        --speed-time 45 `
+        --speed-limit 1024 `
+        -C - `
+        -o $ModelFile `
+        $ModelUrl
+
+    $curlExit = $LASTEXITCODE
+
+    if ($curlExit -eq 0) {
+        $downloadComplete = $true
+        break
+    }
+
+    $savedBytes = 0
+    if (Test-Path $ModelFile) { $savedBytes = (Get-Item $ModelFile).Length }
+    Write-Host "[KIRION] Network dropped (curl $curlExit). Preserved $([math]::Round($savedBytes / 1MB, 1)) MiB; resuming in 3s..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 3
+}
+
+if (-not $downloadComplete) {
+    throw "Qwen GGUF did not finish after $maxOuterAttempts resumable attempts. Partial file was preserved."
+}
 
 $size = (Get-Item $ModelFile).Length
-if ($size -lt 1500000000) {
-    throw "Downloaded GGUF is unexpectedly small ($size bytes). Refusing to launch."
+if ($size -lt 1800000000) {
+    throw "Downloaded GGUF is unexpectedly small ($size bytes). Partial file preserved; rerun to resume."
 }
 
 Write-Host "[KIRION] GGUF READY: $([math]::Round($size / 1GB, 2)) GiB" -ForegroundColor Green
