@@ -1,0 +1,156 @@
+{
+  "protocolVersion": "kirion-worker-v1",
+  "workerId": "google-ai-studio",
+  "providerId": "GOOGLE_AI_STUDIO_GEMINI",
+  "transport": "MANUAL_PROMPT_BRIDGE",
+  "trust": "UNTRUSTED_EXTERNAL_WORKER",
+  "episodeId": "one-talibon-authoritative-rebuild-pass-01",
+  "role": "CODE_WRITER",
+  "objective": "Convert the audited ONE TALIBON React/Vite functional prototype into an authoritative React/Vite + Laravel JSON API + PostgreSQL system while preserving valuable UX and replacing browser-local authority, simulated security, fake file handling, and documentation-only production claims.",
+  "source": {
+    "repository": "Kirion-KimiForge/kimi",
+    "sha": "641b65c13722c884e800e2575a0490a30607bd15",
+    "shaTrust": "UNVERIFIED_ARCHIVE_HINT",
+    "artifactName": "kimi-main.zip",
+    "artifactSha256": "384b568157ca7d3aa8f554350406d582716f5708bbb9d7745499dfcc72ed2efd",
+    "extractedTreeManifestSha256": "5347d85b455ddb41bed8daa6e218b8e8d99fa648f52b21929b22e3383b39627d"
+  },
+  "decisions": {
+    "authentication": "ONE TALIBON local username/password with real TOTP MFA",
+    "frontend": "Keep existing React/Vite frontend and rewire it to a Laravel JSON API",
+    "session": "Same-origin Laravel Sanctum cookie session with CSRF protection; no LocalStorage identity/session authority",
+    "database": "PostgreSQL 15+",
+    "deployment": "Linux/Ubuntu-class self-hosted deployment",
+    "rosterAuthority": "All current office/employee/person/contact seed data is DEMO DATA until an LGU-authoritative roster is supplied, even if any value was sourced from the public web",
+    "files": "Laravel private filesystem storage plus PostgreSQL metadata and authorization-gated download endpoints"
+  },
+  "authority": {
+    "mayRead": true,
+    "mayPropose": true,
+    "mayMutateCandidate": true,
+    "mayAccept": false,
+    "mayIntegrate": false,
+    "mayPromote": false,
+    "mayDeploy": false
+  },
+  "workPackage": {
+    "goal": "Build the authoritative full-stack ONE TALIBON common core from the existing audited prototype.",
+    "sourceSha": "641b65c13722c884e800e2575a0490a30607bd15",
+    "ownedScope": [
+      "src/**",
+      "tests/**",
+      "docs/**",
+      "backend/**",
+      "package.json",
+      "vite.config.*",
+      ".env.example",
+      "docker-compose.yml",
+      "README.md"
+    ],
+    "prohibitedScope": [
+      ".github/**",
+      "production-secrets/**",
+      "real-citizen-data/**",
+      "canonical-main/**"
+    ],
+    "requiredChecks": [
+      "frontend typecheck/lint",
+      "frontend unit tests",
+      "Laravel PHPUnit/Pest tests",
+      "PostgreSQL migrations",
+      "negative authorization tests",
+      "real TOTP enrollment/challenge tests",
+      "document upload/download authorization tests",
+      "search authorization tests",
+      "audit immutability tests",
+      "reference concurrency tests",
+      "frontend production build",
+      "Laravel runtime smoke test",
+      "browser workflow tests if browser tooling exists",
+      "responsive checks if browser tooling exists",
+      "backup/restore drill only if actually executed"
+    ],
+    "mutationBudget": {
+      "maxFiles": 100,
+      "maxRounds": 12
+    }
+  },
+  "auditDisposition": "REWORK",
+  "auditCriticalFindings": [
+    "No real authentication; persona switching is identity takeover.",
+    "Authorization is client-side and inconsistent; permissions[] is effectively unused.",
+    "Audit trail is mutable LocalStorage, not immutable.",
+    "MFA is a boolean/method flag, not cryptographic MFA.",
+    "Unauthorized data already exists in the browser store before filtering.",
+    "PostgreSQL and Laravel are documentation targets only, not runtime.",
+    "Documents are metadata simulations; no file bytes, SHA-256, secure download, MIME validation, or storage.",
+    "Workflow configuration does not govern actual task/work-request execution.",
+    "No queue, scheduler, email/SMS delivery, durable multi-user state, or concurrency guarantees.",
+    "Backup/restore was not executed and must not be reported PASS."
+  ],
+  "preserveFrontend": [
+    "municipal visual system and shell",
+    "navigation IA",
+    "My Work",
+    "Tasks",
+    "Work Requests",
+    "Correspondence",
+    "Documents UI shell",
+    "Global Search interaction",
+    "Notifications UI",
+    "Calendar and Meetings",
+    "Announcements",
+    "Memoranda",
+    "Messaging",
+    "Directory",
+    "Workflow visualization",
+    "Reports",
+    "Audit presentation",
+    "role dashboard layouts"
+  ],
+  "removeOrRebuild": [
+    "Persona Switcher from production path",
+    "LocalStorage as authoritative persistence",
+    "client-side RBAC as trust boundary",
+    "MFA toggle implementation",
+    "document fake upload/download/hash/compliance behavior",
+    "hard-coded or invented official KPIs/policy claims",
+    "unverified retention compliance claims",
+    "any official-roster wording for demo data"
+  ],
+  "unresolvedBusinessAuthority": [
+    "final Procurement/BAC lifecycle",
+    "official Project Monitoring/RPMES KPI definitions",
+    "official municipal document numbering masks",
+    "department-specific SLAs/escalation matrices",
+    "final office/employee authoritative roster",
+    "official departmental routing/approval chains"
+  ],
+  "resultContract": {
+    "status": [
+      "COMPLETE",
+      "COMPLETE_WITH_LIMITATIONS",
+      "BLOCKED",
+      "FAILED"
+    ],
+    "checks": [
+      "PASS",
+      "FAIL",
+      "NOT_EXECUTED",
+      "UNVERIFIED"
+    ],
+    "forbiddenClaims": [
+      "ACCEPTED",
+      "INTEGRATED",
+      "PROMOTED",
+      "DEPLOYED",
+      "PRODUCTION_ACCEPTED"
+    ],
+    "requiredArtifacts": [
+      "KIRION_WORKER_RESULT.json",
+      "docs/KIRION_IMPLEMENTATION_EVIDENCE.md",
+      "docs/KIRION_UNRESOLVED_AUTHORITY.md",
+      "candidate file SHA-256 manifest if executable tooling permits"
+    ]
+  }
+}
