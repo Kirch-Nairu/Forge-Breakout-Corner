@@ -19,14 +19,17 @@ This directory is the first executable bootstrap for the KIRION Software Factory
 - real Git detached-worktree isolation primitive
 - browser control surface for session → discovery → targeted questions → work-package proposal → authorization
 - cross-platform self-test including a real temporary Git worktree isolation test
+- external-worker nesting contract for Google AI Studio, Kimi and future providers
 
 ## What this stage intentionally does **not** do
 
 It does not yet let the model patch files, execute arbitrary shell commands, integrate candidates, promote releases, or deploy. Those capabilities must be added behind Forge authority and evidence gates rather than exposed as generic model tools.
 
+External workers are intentionally treated as **untrusted workers**. They may produce plans, code, candidates and evidence claims, but they cannot grant themselves acceptance, integration, promotion or deployment authority.
+
 ## Model target
 
-Initial target:
+Initial local target:
 
 ```text
 Qwen2.5-Coder-3B-Instruct
@@ -46,6 +49,30 @@ The current llama.cpp WinGet package can be installed with:
 ```powershell
 winget install --id ggml.llamacpp -e
 ```
+
+## External Forge workers
+
+See `docs/EXTERNAL_WORKER_PROTOCOL.md`.
+
+Current worker profiles:
+
+```text
+local-llama        → OpenAI-compatible localhost worker
+google-ai-studio   → manual Forge packet / result bridge
+kimi-forge         → external candidate / Git-backed worker lane
+```
+
+The invariant is:
+
+```text
+WORKER PROPOSES / BUILDS
+FORGE VERIFIES
+FORGE REVIEWS
+FORGE CONTROLS ACCEPTANCE
+HUMAN CONTROLS PROMOTION / DEPLOYMENT
+```
+
+This makes Google AI Studio usable as a Forge worker without pretending the AI Studio browser is itself a trusted control plane. A later Gemini API adapter may automate the transport while preserving the exact same packet/result contract.
 
 ## Run
 
@@ -118,5 +145,6 @@ The next lane is the controlled execution kernel:
 6. independent Reviewer context
 7. evidence bundle + candidate SHA
 8. OMEGA event projection
+9. automated provider transports carrying the external-worker packet/result contract
 
 No direct `main` mutation and no generic shell endpoint.

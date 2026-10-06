@@ -13,6 +13,8 @@ const { validateWorkPackage } = require('./src/core/work-package');
 const { EpisodeStore } = require('./src/state/episode-store');
 const { hardwareSnapshot } = require('./src/worker/hardware');
 const { createWorktree, removeWorktree } = require('./src/runner/worktree');
+const { getWorkerProfile, listWorkers } = require('./src/workers/registry');
+const { buildWorkerPacket, renderManualPrompt, importWorkerResult } = require('./src/workers/manual-bridge');
 
 function exec(command, args, cwd) {
   return new Promise((resolve, reject) => {
@@ -89,6 +91,63 @@ async function testWorktreeIsolation() {
   } finally { await fsp.rm(base,{recursive:true,force:true}); }
 }
 
+async function testExternalWorkerNesting() {
+  const workers = listWorkers();
+  assert.equal(workers.some(w => w.id === 'google-ai-studio'), true);
+  assert.equal(workers.some(w => w.id === 'kimi-forge'), true);
+  assert.equal(getWorkerProfile('google-ai-studio').trust, 'UNTRUSTED_EXTERNAL_WORKER');
+
+  const wp = validateWorkPackage({
+    goal:'build bounded feature',
+    sourceSha:'b'.repeat(40),
+    ownedScope:['src/**'],
+    prohibitedScope:['.github/**'],
+    requiredChecks:['npm test'],
+    steps:['implement and test'],
+    mutationBudget:{maxFiles:8,maxRounds:3}
+  });
+  const packet = buildWorkerPacket({
+    workerId:'google-ai-studio',
+    episode:{id:'episode-external-worker'},
+    workPackage:wp,
+    source:{repository:'example/repo',sha:wp.sourceSha},
+    context:[{kind:'requirement',value:'do not mutate main'}]
+  });
+  assert.equal(packet.authority.mayMutateCandidate, true);
+  assert.equal(packet.authority.mayAccept, false);
+  assert.equal(packet.authority.mayIntegrate, false);
+  assert.match(renderManualPrompt(packet), /FORGE WILL INDEPENDENTLY VERIFY ALL CLAIMS/);
+
+  const result = importWorkerResult({
+    protocolVersion:'kirion-worker-v1',
+    episodeId:'episode-external-worker',
+    status:'COMPLETE',
+    sourceSha:wp.sourceSha,
+    summary:'candidate produced',
+    claims:[],
+    changedFiles:['src/a.js'],
+    checks:[{name:'npm test',status:'UNVERIFIED',evidence:'worker claim only'}],
+    unresolved:[],
+    candidate:{repository:'example/repo',branch:'candidate',sha:''},
+    handoff:'verify exact candidate'
+  }, packet);
+  assert.equal(result.status, 'COMPLETE');
+
+  assert.throws(() => importWorkerResult({
+    protocolVersion:'kirion-worker-v1',
+    episodeId:'episode-external-worker',
+    status:'COMPLETE',
+    sourceSha:wp.sourceSha,
+    summary:'self promoted',
+    claims:['ACCEPTED'],
+    changedFiles:[],
+    checks:[],
+    unresolved:[],
+    candidate:{},
+    handoff:''
+  }, packet), /forbidden self-authority claim/i);
+}
+
 async function main() {
   const config = loadConfig();
   await testLifecycle();
@@ -97,10 +156,11 @@ async function main() {
   await testWorkPackage();
   await testStore();
   await testWorktreeIsolation();
+  await testExternalWorkerNesting();
   const hardware = hardwareSnapshot(config);
   assert.ok(hardware.memory.totalBytes > 0);
   console.log('KIRION POTATO-16 bootstrap selftest: PASS');
-  console.log(JSON.stringify({ profile:config.profile, logicalCpus:hardware.logicalCpus, totalMemoryGiB:(hardware.memory.totalBytes/1073741824).toFixed(1) }, null, 2));
+  console.log(JSON.stringify({ profile:config.profile, logicalCpus:hardware.logicalCpus, totalMemoryGiB:(hardware.memory.totalBytes/1073741824).toFixed(1), externalWorkers:['google-ai-studio','kimi-forge'] }, null, 2));
 }
 
 main().catch(err => { console.error(err.stack || err); process.exitCode = 1; });
